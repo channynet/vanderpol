@@ -1,0 +1,100 @@
+{
+  "description": "Feature targets extracted from local real ECG validation files. These targets guide synthetic rhythm tuning but are not treatment-outcome labels.",
+  "feature_keys": [
+    "heart_rate_bpm",
+    "rr_cv",
+    "qrs_width_s",
+    "dominant_frequency_hz",
+    "spectral_entropy",
+    "sample_entropy",
+    "signal_quality"
+  ],
+  "targets": {
+    "mitdb_svt_afl": {
+      "source": "outputs/mitdb_abnormal_windows.csv",
+      "labels": ["SVT", "AFL"],
+      "n": 124,
+      "means": {
+        "heart_rate_bpm": 139.3160587997067,
+        "rr_cv": 0.2697751248739238,
+        "qrs_width_s": 0.043779121863799286,
+        "dominant_frequency_hz": 2.6794354838709675,
+        "spectral_entropy": 0.7577274447703188,
+        "sample_entropy": 0.4777922559301507,
+        "signal_quality": 0.46070585936132896
+      }
+    },
+    "mitdb_vt": {
+      "source": "outputs/mitdb_abnormal_windows.csv",
+      "labels": ["VT"],
+      "n": 70,
+      "means": {
+        "heart_rate_bpm": 143.35638718611108,
+        "rr_cv": 0.36994980660269766,
+        "qrs_width_s": 0.07131349206349206,
+        "dominant_frequency_hz": 2.617857142857143,
+        "spectral_entropy": 0.6694438656038796,
+        "sample_entropy": 0.2649900722532707,
+        "signal_quality": 0.49953121979145293
+      }
+    },
+    "mitdb_vf": {
+      "source": "outputs/mitdb_abnormal_windows.csv",
+      "labels": ["VF"],
+      "n": 28,
+      "means": {
+        "heart_rate_bpm": 156.87193637450937,
+        "rr_cv": 0.35289965393813255,
+        "qrs_width_s": 0.15179563492063491,
+        "dominant_frequency_hz": 2.857142857142857,
+        "spectral_entropy": 0.5014991858046491,
+        "sample_entropy": 0.5959685027432184,
+        "signal_quality": 0.5628885759728509
+      }
+    },
+    "cudb_vt": {
+      "source": "outputs/cudb_annotated_vt_vf.csv",
+      "labels": ["VT"],
+      "n": 8,
+      "means": {
+        "heart_rate_bpm": 162.3680945585779,
+        "rr_cv": 0.29181303664733066,
+        "qrs_width_s": 0.1285,
+        "dominant_frequency_hz": 2.625,
+        "spectral_entropy": 0.5007064717676413,
+        "sample_entropy": 0.4448536657892328,
+        "signal_quality": 0.5622844305473989
+      }
+    },
+    "cudb_vf": {
+      "source": "outputs/cudb_annotated_vt_vf.csv",
+      "labels": ["VF"],
+      "n": 6,
+      "means": {
+        "heart_rate_bpm": 143.26587530086914,
+        "rr_cv": 0.3327863495055262,
+        "qrs_width_s": 0.10666666666666667,
+        "dominant_frequency_hz": 4.833333333333333,
+        "spectral_entropy": 0.3904599703634463,
+        "sample_entropy": 0.5390131130591629,
+        "signal_quality": 0.5597418646681186
+      }
+    }
+  },
+  "current_scope": {
+    "simulated_scenarios": [
+      "nsr",
+      "svt_flutter",
+      "monomorphic_vt",
+      "polymorphic_vt",
+      "vf_like"
+    ],
+    "not_added_now": [
+      "afib",
+      "ventricular_bigeminy",
+      "ventricular_trigeminy",
+      "ivr",
+      "nodal"
+    ]
+  }
+}

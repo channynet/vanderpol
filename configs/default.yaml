@@ -1,0 +1,23 @@
+seed: 7
+sampling_rate_hz: 250
+observation_s: 4.0
+treatment_horizon_s: 30.0
+patients_per_scenario: 100
+patient_variability: 0.2
+
+reward:
+  success_bonus: 100.0
+  energy_weight: 0.0
+  time_weight: 1.0
+  safety_weight: 0.0
+
+selector:
+  name: linucb
+  alpha: 0.75
+  ridge: 1.0
+
+external_data:
+  mit_bih: data/raw/mitdb
+  cudb: data/raw/cudb
+  cinc2015: data/raw/challenge-2015
+  ptb_xl: data/raw/ptb-xl

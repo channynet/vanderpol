@@ -1,0 +1,18 @@
+{
+  "preset": "n100",
+  "patients_per_scenario": 100,
+  "horizon_s": 30.0,
+  "train_fraction": 0.7,
+  "selector_seed": 7,
+  "selector_stability_seeds": [1, 7, 13, 21],
+  "bootstrap_samples": 300,
+  "decision_grid_size": 50,
+  "noise_profiles": ["clean", "mild", "moderate", "severe"],
+  "fallback_min_sqi": [0.3, 0.42, 0.5],
+  "fallback_entropy": [0.55, 0.62],
+  "fallback_rr_cv": [0.25, 0.3],
+  "real_noise_stats": "outputs/real_noise_stats.json",
+  "category_noise_stats": "outputs/challenge2015_category_noise_n10.json",
+  "calibration_config": "configs/calibration.json",
+  "n_jobs": 6
+}

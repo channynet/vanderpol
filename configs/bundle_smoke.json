@@ -1,0 +1,16 @@
+{
+  "preset": "smoke",
+  "patients_per_scenario": 1,
+  "horizon_s": 3.0,
+  "train_fraction": 0.7,
+  "selector_seed": 7,
+  "selector_stability_seeds": [1, 7],
+  "bootstrap_samples": 20,
+  "decision_grid_size": 8,
+  "noise_profiles": ["clean", "severe"],
+  "fallback_min_sqi": [0.35, 0.50],
+  "fallback_entropy": [0.62],
+  "fallback_rr_cv": [0.30],
+  "real_noise_stats": "outputs/real_noise_stats.json",
+  "calibration_config": "configs/calibration.json"
+}

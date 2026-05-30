@@ -1,0 +1,77 @@
+{
+  "description": "Literature-guided calibration targets for the synthetic electrical-stimulation library. Ranges are anchors for simulation behavior, not clinical claims.",
+  "targets": [
+    {
+      "scenario": "svt_flutter",
+      "algorithm": "synchronized_cardioversion",
+      "metric": "success_rate",
+      "min": 0.75,
+      "max": 0.98,
+      "source": "AHA ACLS tachyarrhythmia guidance",
+      "note": "Unstable tachycardia and organized tachyarrhythmia electrical therapy anchor."
+    },
+    {
+      "scenario": "monomorphic_vt",
+      "algorithm": "atp_burst_pacing",
+      "metric": "success_rate",
+      "min": 0.75,
+      "max": 1.0,
+      "source": "ICD/ATP ventricular tachycardia literature",
+      "note": "Monomorphic VT ATP should terminate most simulated regular VT episodes."
+    },
+    {
+      "scenario": "polymorphic_vt",
+      "algorithm": "atp_burst_pacing",
+      "metric": "success_rate",
+      "min": 0.0,
+      "max": 0.25,
+      "source": "ICD/ATP ventricular tachycardia literature",
+      "note": "Irregular polymorphic rhythm is modeled as a poor ATP target."
+    },
+    {
+      "scenario": "vf_like",
+      "algorithm": "unsynchronized_defibrillation",
+      "metric": "success_rate",
+      "min": 0.75,
+      "max": 1.0,
+      "source": "AHA ACLS shockable rhythm guidance",
+      "note": "VF-like rhythm should favor unsynchronized high-energy shock."
+    },
+    {
+      "scenario": "vf_like",
+      "algorithm": "synchronized_cardioversion",
+      "metric": "success_rate",
+      "min": 0.0,
+      "max": 0.2,
+      "source": "AHA ACLS tachyarrhythmia guidance",
+      "note": "VF-like rhythm has no stable R-wave sync target in this simulator."
+    },
+    {
+      "scenario": "monomorphic_vt",
+      "algorithm": "resonant_drift_pacing",
+      "metric": "energy_ratio_vs_unsync_defibrillation",
+      "min": 0.0,
+      "max": 0.2,
+      "source": "Morgan/Biktashev resonant-drift simulation work",
+      "note": "Low-energy feedback pacing should use a small fraction of defibrillation energy."
+    },
+    {
+      "scenario": "vf_like",
+      "algorithm": "resonant_drift_pacing",
+      "metric": "success_rate",
+      "min": 0.0,
+      "max": 0.35,
+      "source": "Morgan/Biktashev resonant-drift simulation work",
+      "note": "Chaotic VF-like signals remain difficult for phase-based pacing."
+    },
+    {
+      "scenario": "nsr",
+      "algorithm": "adaptive_low_energy_pacing",
+      "metric": "success_rate",
+      "min": 0.95,
+      "max": 1.0,
+      "source": "Safety default",
+      "note": "Normal rhythm should be recognized and stimulation withheld."
+    }
+  ]
+}

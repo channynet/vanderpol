@@ -1,0 +1,68 @@
+{
+  "sources": [
+    {
+      "id": "gois_savi_2009",
+      "title": "Gois-Savi coupled oscillator heart rhythm model",
+      "type": "simulator_model",
+      "url": "https://ideas.repec.org/a/eee/chsofr/v41y2009i5p2553-2565.html",
+      "role": "Reduced-order oscillator reference for the simulator environment.",
+      "phase": "Phase 1"
+    },
+    {
+      "id": "mitdb",
+      "title": "MIT-BIH Arrhythmia Database",
+      "type": "external_ecg",
+      "url": "https://physionet.org/content/mitdb/1.0.0/",
+      "role": "Annotated arrhythmia morphology and R/RR/QRS feature validation.",
+      "phase": "Phase 3"
+    },
+    {
+      "id": "cudb",
+      "title": "Creighton University Ventricular Tachyarrhythmia Database",
+      "type": "external_ecg",
+      "url": "https://physionet.org/content/cudb/1.0.0/",
+      "role": "Sustained VT, ventricular flutter, and VF-like waveform validation.",
+      "phase": "Phase 3"
+    },
+    {
+      "id": "challenge_2015",
+      "title": "PhysioNet/CinC Challenge 2015",
+      "type": "external_ecg_noise",
+      "url": "https://physionet.org/content/challenge-2015/1.0.0/",
+      "role": "ICU alarm-like noisy ECG and false-alarm robustness checks.",
+      "phase": "Phase 5"
+    },
+    {
+      "id": "ptb_xl",
+      "title": "PTB-XL ECG dataset",
+      "type": "optional_pretraining",
+      "url": "https://physionet.org/content/ptb-xl/1.0.3/",
+      "role": "Optional large-scale ECG encoder pretraining source.",
+      "phase": "Phase 3 extension"
+    },
+    {
+      "id": "aha_acls_2025",
+      "title": "AHA Adult Advanced Life Support and tachyarrhythmia algorithms",
+      "type": "guideline_anchor",
+      "url": "https://cpr.heart.org/en/resuscitation-science/cpr-and-ecc-guidelines/adult-advanced-life-support/",
+      "role": "ACLS-style baseline thresholds and electrical cardioversion rule anchors.",
+      "phase": "Phase 4"
+    },
+    {
+      "id": "atp_icd_anchor",
+      "title": "ICD anti-tachycardia pacing literature anchor",
+      "type": "calibration_anchor",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/20525727/",
+      "role": "Monomorphic VT ATP success-rate target range for simulator calibration.",
+      "phase": "Phase 2"
+    },
+    {
+      "id": "morgan_biktashev_2008",
+      "title": "Morgan/Biktashev resonant drift low-energy defibrillation simulation",
+      "type": "calibration_anchor",
+      "url": "https://arxiv.org/abs/0805.0223",
+      "role": "Low-energy phase-feedback pacing energy-scale calibration.",
+      "phase": "Phase 2"
+    }
+  ]
+}
