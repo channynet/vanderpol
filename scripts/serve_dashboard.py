@@ -29,6 +29,7 @@ from vanderpol.dashboard import (  # noqa: E402
     load_run_events,
     load_run_metrics,
     load_run_progress,
+    load_run_storage,
     render_dashboard_html,
     tail_text,
 )
@@ -139,6 +140,8 @@ def _handler_factory(runs_dir: Path) -> type[BaseHTTPRequestHandler]:
                 _send_json(self, load_failure(run_dir) or {})
             elif suffix == "diagnostics":
                 _send_json(self, load_run_diagnostics(run_dir))
+            elif suffix == "storage":
+                _send_json(self, load_run_storage(run_dir))
             else:
                 _send_json(self, {"error": "not found"}, HTTPStatus.NOT_FOUND)
 

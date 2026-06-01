@@ -49,7 +49,18 @@ class Stage9Tests(unittest.TestCase):
                                 "mean_time_s": 1.0,
                                 "mean_safety_violations": 0.0,
                             },
-                        }
+                        },
+                        "feature_weights": {
+                            "unsynchronized_defibrillation": {
+                                "heart_rate_bpm": 1.0,
+                                "rr_cv": 0.5,
+                                "qrs_width_s": 0.25,
+                                "dominant_frequency_hz": 0.1,
+                                "spectral_entropy": 0.3,
+                                "sample_entropy": 0.2,
+                                "signal_quality": -0.1,
+                            }
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -183,9 +194,25 @@ class Stage9Tests(unittest.TestCase):
             self.assertTrue(Path(artifacts["paper_selector_table_csv"]).exists())
             self.assertTrue(Path(artifacts["paper_artifacts_manifest_json"]).exists())
             self.assertTrue(Path(artifacts["live_dashboard_html"]).exists())
+            self.assertTrue(Path(artifacts["intermediate_results_html"]).exists())
+            self.assertTrue(Path(artifacts["intermediate_waveforms_svg"]).exists())
+            self.assertTrue(Path(artifacts["final_results_html"]).exists())
+            self.assertTrue(Path(artifacts["waveform_analysis_weights_svg"]).exists())
+            self.assertTrue(Path(artifacts["visual_report_html"]).exists())
+            self.assertTrue(Path(artifacts["final_visual_summary_svg"]).exists())
+            self.assertTrue(Path(artifacts["policy_comparison_svg"]).exists())
+            self.assertTrue(Path(artifacts["treatment_success_heatmap_svg"]).exists())
             self.assertIn(
                 "Selector LinUCB",
                 Path(artifacts["paper_selector_table_md"]).read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "Intermediate Results",
+                Path(artifacts["intermediate_results_html"]).read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "Final Results",
+                Path(artifacts["final_results_html"]).read_text(encoding="utf-8"),
             )
             self.assertIn(
                 "Simulation-only",

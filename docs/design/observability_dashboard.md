@@ -461,6 +461,19 @@ The MVP dashboard reads files only.
 
 7. Artifacts
    - table of artifacts
+   - run display name from `outputs/runs/run_labels.json`
+   - selected run storage folder
+   - all run data files including manifest/progress/events/metrics/artifact logs
+   - category grouping: paper results, figures, tables, reports, documents, logs, run metadata
+   - important results are rendered in the dashboard without forcing the user to
+     hunt through files:
+     - paper or executive summary markdown
+     - reward/success/time/safety heatmaps
+     - decision boundary image
+     - selector comparison table
+     - scenario winner table
+     - noise robustness table
+     - fallback threshold table
    - path
    - type
    - partial/final status
@@ -478,6 +491,7 @@ Suggested endpoints:
 - `GET /api/runs/{run_id}/metrics`
 - `GET /api/runs/{run_id}/artifacts`
 - `GET /api/runs/{run_id}/failure`
+- `GET /api/runs/{run_id}/storage`
 
 Server must bind to `127.0.0.1`, not `0.0.0.0`.
 

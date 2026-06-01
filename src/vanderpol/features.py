@@ -7,6 +7,19 @@ import numpy as np
 from .types import ObservationWindow
 
 
+FEATURE_VECTOR_KEYS = (
+    "heart_rate_bpm",
+    "rr_cv",
+    "qrs_width_s",
+    "dominant_frequency_hz",
+    "spectral_entropy",
+    "sample_entropy",
+    "signal_quality",
+)
+
+FEATURE_VECTOR_SCALES = (240.0, 1.0, 0.22, 12.0, 1.0, 2.5, 1.0)
+
+
 def make_observation(ecg: np.ndarray, fs_hz: int) -> ObservationWindow:
     duration_s = float(len(ecg) / fs_hz)
     features = extract_features(ecg, fs_hz)
@@ -178,17 +191,8 @@ def classify_acls_features(features: dict[str, float]) -> str:
 
 
 def feature_vector(features: dict[str, float]) -> np.ndarray:
-    keys = [
-        "heart_rate_bpm",
-        "rr_cv",
-        "qrs_width_s",
-        "dominant_frequency_hz",
-        "spectral_entropy",
-        "sample_entropy",
-        "signal_quality",
-    ]
-    raw = np.array([features.get(key, 0.0) for key in keys], dtype=float)
-    scale = np.array([240.0, 1.0, 0.22, 12.0, 1.0, 2.5, 1.0], dtype=float)
+    raw = np.array([features.get(key, 0.0) for key in FEATURE_VECTOR_KEYS], dtype=float)
+    scale = np.array(FEATURE_VECTOR_SCALES, dtype=float)
     return np.clip(raw / scale, 0.0, 3.0)
 
 

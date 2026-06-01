@@ -53,6 +53,33 @@ class Stage8Tests(unittest.TestCase):
             summary = generate_executive_summary(manifest["manifest_path"], Path(tmp) / "summary.md")
             self.assertIn("Executive Summary", summary)
 
+    def test_bundle_generates_intermediate_and_final_result_views(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = default_bundle_config("smoke")
+            config.update(
+                {
+                    "patients_per_scenario": 1,
+                    "horizon_s": 2.0,
+                    "enabled_steps": ["selector_report", "paper_artifacts"],
+                }
+            )
+            manifest = run_experiment_bundle(config, output_dir=Path(tmp), run_id="paper-run")
+            run_dir = Path(manifest["run_dir"])
+            self.assertIn("paper_artifacts", manifest["step_order"])
+            self.assertEqual(
+                manifest["step_labels"]["paper_artifacts"],
+                "stage9 - 중간 결과와 최종 결과를 화면에 정리하는 단계",
+            )
+            self.assertTrue((run_dir / "paper_artifacts" / "intermediate_results.html").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "intermediate_waveforms.svg").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "final_results.html").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "waveform_analysis_weights.svg").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "visual_report.html").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "final_visual_summary.svg").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "paper_summary.md").exists())
+            self.assertTrue((run_dir / "paper_artifacts" / "paper_artifacts_manifest.json").exists())
+            self.assertTrue(any(step["name"] == "paper_artifacts" and step["status"] == "ok" for step in manifest["steps"]))
+
     def test_progress_infers_partial_run_and_resume_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = default_bundle_config("smoke")

@@ -169,13 +169,72 @@ Top-level 메뉴는 다음 8개로 재구성한다.
 
 주요 구성요소:
 
-- run list: `run_id`, status, current step, progress, heartbeat age, updated time.
+- run list: `run_id`, terminal/running status, current step, compact progress indicator.
 - selected run summary: preset, patients per scenario, horizon, completed steps,
-  terminal status.
+  terminal status, progress, live progress, heartbeat age, updated time.
 - baseline selector: 현재 run과 비교할 `baseline_run_id` 지정.
 - comparison preview: config diff, headline metric diff, changed artifacts count.
 
 기존 `Overview`의 status card는 이 화면과 `Analysis Overview`에서 재사용한다.
+
+#### Runs 목록 위치 상세 분석
+
+Run 항목 목록은 좌측 전역 sidebar가 아니라 Top-level `Runs` 메뉴의 본문
+하위 콘텐츠로 두는 것이 더 적합하다. 사용자는 `Runs` 메뉴를 눌렀을 때
+run 선택, 현재 run 요약, baseline 비교를 한 화면에서 기대한다. 반대로
+좌측 sidebar는 `Data`, `Method Setup`, `Analysis`, `Review`, `Paper`로
+이동하는 전역 navigation 역할에 집중해야 한다.
+
+따라서 `stage9_n100_time2`, `dashboard_smoke_observability`,
+`stage9_n100` 같은 run 항목들은 `Runs` 화면 내부의 `Run Selector`
+영역에 배치한다. 사이드바에는 Top-level 메뉴인 `Runs` 버튼만 남기고,
+선택 가능한 run 리스트를 별도 navigation 그룹처럼 반복 노출하지 않는다.
+이렇게 하면 `Runs`가 메뉴인지, run 목록인지 역할이 섞이는 문제를 줄일 수
+있다.
+
+다만 run item 안에
+`stage9_n100_time2`, `completed step 100.0% live 100.0%`처럼 상세 상태
+문장을 모두 넣는 것도 적합하지 않다.
+
+이유는 다음과 같다.
+
+| 항목 | Run Selector 표시 여부 | 이유 |
+| --- | --- | --- |
+| `run_id` | 표시 | 선택 대상의 기본 식별자다. |
+| terminal/running status | 표시 | completed, running, stalled, failed 정도는 빠른 스캔에 필요하다. |
+| current step | 조건부 표시 | running/stalled run에서는 유용하지만 completed run에서는 빈 값이거나 중복이다. |
+| coarse progress bar | 표시 가능 | 텍스트보다 시각적이고 공간을 적게 쓴다. |
+| `step 100.0%` text | 목록에서는 제외 | 아래 Run Snapshot/Analysis에서 더 정확한 맥락으로 보여야 한다. |
+| `live 100.0%` text | 목록에서는 제외 | display progress와 coarse progress의 차이는 설명이 필요한 분석 정보다. |
+| heartbeat age, updated time | 목록에서는 제외 | 목록을 복잡하게 만들며 Analysis/System 성격의 정보다. |
+
+따라서 `Runs` 메뉴 본문은 다음 순서로 구성한다.
+
+1. `Run Selector`: run 목록과 coarse progress bar.
+2. `Run Snapshot`: 선택 run의 상태, step progress, live estimate,
+   heartbeat age, elapsed/ETA.
+3. `Baseline Compare`: 기준 run 선택과 diff preview.
+
+권장 run item 표시 형식은 다음과 같다.
+
+```text
+stage9_n100_time2
+completed
+[compact progress bar]
+```
+
+running 또는 stalled run만 current step을 보조 텍스트로 덧붙인다.
+
+```text
+stage9_n100
+stalled - fallback_threshold_sweep
+[compact progress bar]
+```
+
+이렇게 하면 좌측은 navigation 역할에 집중하고, run 선택은 `Runs` 메뉴의
+하위 콘텐츠로 명확해진다. `completed_steps`, `progress_fraction`,
+`display_progress_fraction`, `heartbeat_age_s` 같은 상세 상태는 같은 화면의
+`Run Snapshot` 또는 `Analysis` 본문에서 비교/해석 가능한 형태로 유지된다.
 
 ### 2. Data
 

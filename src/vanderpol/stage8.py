@@ -45,6 +45,24 @@ from .stage7 import (
     load_profiles_from_category_stats,
     save_threshold_sweep,
 )
+from .stage9 import generate_paper_artifacts
+
+
+STEP_DISPLAY_NAMES = {
+    "phase2_figures": "stage2 - run별 중간 성능 그림을 만드는 단계",
+    "calibration_report": "stage3 - 데이터 생성 기준을 검증하는 단계",
+    "selector_report": "stage5 - AI가 파형 특징으로 치료 판단을 학습하는 단계",
+    "decision_boundary": "stage5 - AI 판단 경계를 확인하는 단계",
+    "bootstrap_ci": "stage5 - 최종 정답률의 불확실성을 계산하는 단계",
+    "selector_stability": "stage5 - AI 학습 안정성을 확인하는 단계",
+    "noise_ood_sweep": "stage6 - 노이즈가 들어온 파형에서 AI 판단을 점검하는 단계",
+    "fallback_threshold_sweep": "stage7 - 낮은 품질 파형의 보수 판단 기준을 찾는 단계",
+    "paper_artifacts": "stage9 - 중간 결과와 최종 결과를 화면에 정리하는 단계",
+}
+
+
+def friendly_step_name(name: str) -> str:
+    return STEP_DISPLAY_NAMES.get(name, name)
 
 
 @dataclass(frozen=True)
@@ -183,6 +201,11 @@ def run_experiment_bundle(
             "fallback_threshold_sweep",
             expected_step_outputs("fallback_threshold_sweep", run_dir),
             lambda: _fallback_outputs(config, run_dir, patients, horizon, weights, n_jobs),
+        ),
+        (
+            "paper_artifacts",
+            expected_step_outputs("paper_artifacts", run_dir),
+            lambda: _paper_artifact_outputs(run_dir),
         ),
     ]
     enabled_steps = set(config.get("enabled_steps") or [name for name, _, _ in step_fns])
@@ -323,12 +346,14 @@ def run_experiment_bundle(
         run_status=run_status,
         provenance=provenance,
     )
-    manifest_path = run_dir / "run_manifest.json"
-    _write_json(manifest, manifest_path)
     summary_path = run_dir / "executive_summary.md"
-    generate_executive_summary(manifest_path, summary_path)
+    manifest_path = run_dir / "run_manifest.json"
     manifest["manifest_path"] = str(manifest_path)
     manifest["summary_path"] = str(summary_path)
+    _write_json(manifest, manifest_path)
+    generate_executive_summary(manifest_path, summary_path)
+    if run_status == "completed" and any(step.name == "paper_artifacts" and step.status in {"ok", "skipped"} for step in steps):
+        _paper_artifact_outputs(run_dir)
     terminal_event = "run_done" if run_status == "completed" else "run_stopped" if run_status == "stopped" else "run_failed"
     recorder.event(terminal_event, status=run_status, message=f"Run {run_status}.", fsync=True)
     recorder.notify(terminal_event, {"status": run_status, "run_dir": str(run_dir)}, config)
@@ -362,7 +387,8 @@ def generate_executive_summary(
         "",
     ]
     for step in manifest["steps"]:
-        lines.append(f"- `{step['name']}`: {step['status']} ({step['duration_s']:.2f}s)")
+        label = step.get("display_name") or friendly_step_name(step["name"])
+        lines.append(f"- `{label}`: {step['status']} ({step['duration_s']:.2f}s)")
 
     if calibration:
         lines.extend(
@@ -452,6 +478,21 @@ def expected_step_outputs(name: str, run_dir: str | Path) -> list[str]:
             run_dir / "fallback_threshold_sweep.csv",
             run_dir / "fallback_threshold_sweep.partial.json",
             run_dir / "fallback_threshold_sweep.partial.csv",
+        ],
+        "paper_artifacts": [
+            run_dir / "paper_artifacts" / "intermediate_results.html",
+            run_dir / "paper_artifacts" / "final_results.html",
+            run_dir / "paper_artifacts" / "intermediate_waveforms.svg",
+            run_dir / "paper_artifacts" / "visual_report.html",
+            run_dir / "paper_artifacts" / "final_visual_summary.svg",
+            run_dir / "paper_artifacts" / "policy_comparison.svg",
+            run_dir / "paper_artifacts" / "treatment_success_heatmap.svg",
+            run_dir / "paper_artifacts" / "waveform_analysis_weights.svg",
+            run_dir / "paper_artifacts" / "paper_summary.md",
+            run_dir / "paper_artifacts" / "paper_artifacts_manifest.json",
+            run_dir / "paper_artifacts" / "live_dashboard.html",
+            run_dir / "paper_artifacts" / "citations.md",
+            run_dir / "paper_artifacts" / "limitations.md",
         ],
     }
     if name not in outputs:
@@ -610,7 +651,7 @@ def render_progress_markdown(manifest: dict[str, Any]) -> str:
             "## Live Commands",
             "",
             f"- Refresh progress: `python scripts/show_run_progress.py {manifest.get('run_dir', '')}`",
-            f"- Generate current paper artifacts: `python scripts/generate_live_report.py {manifest.get('run_dir', '')}`",
+            f"- Generate current result views: `python scripts/generate_live_report.py {manifest.get('run_dir', '')}`",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -641,9 +682,11 @@ def _base_manifest(
         "environment": environment_snapshot(),
         "provenance": provenance,
         "step_order": step_order,
-        "steps": [step.__dict__ for step in steps],
+        "step_labels": {name: friendly_step_name(name) for name in step_order},
+        "steps": [{**step.__dict__, "display_name": friendly_step_name(step.name)} for step in steps],
         "run_status": run_status,
         "current_step": current_step,
+        "current_step_label": friendly_step_name(current_step) if current_step else None,
         "completed_steps": completed,
         "total_steps": total,
         "progress_fraction": (completed / total) if total else 0.0,
@@ -711,6 +754,7 @@ def _enabled_step_order(config: dict[str, Any]) -> list[str]:
         "selector_stability",
         "noise_ood_sweep",
         "fallback_threshold_sweep",
+        "paper_artifacts",
     ]
     enabled = set(config.get("enabled_steps") or all_steps)
     return [name for name in all_steps if name in enabled]
@@ -934,6 +978,14 @@ def _fallback_outputs(
     csv_path = run_dir / "fallback_threshold_sweep.csv"
     save_threshold_sweep(report, json_path, csv_path)
     return [str(json_path), str(csv_path), str(partial_json), str(partial_csv)]
+
+
+def _paper_artifact_outputs(run_dir: Path) -> list[str]:
+    manifest_path = run_dir / "run_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(str(manifest_path))
+    artifact_manifest = generate_paper_artifacts(manifest_path, output_dir=run_dir / "paper_artifacts")
+    return [str(path) for path in artifact_manifest.get("artifacts", {}).values()]
 
 
 def _record_step_outputs(recorder: RunRecorder, step: str, outputs: list[str]) -> None:

@@ -13,7 +13,7 @@ import numpy as np
 from .algorithms import all_algorithms
 from .bandit import LinUCB, mean_oracle_gap, oracle_actions
 from .experiments import MatrixRow, run_algorithm_matrix, summarize_matrix
-from .features import feature_vector
+from .features import FEATURE_VECTOR_KEYS, feature_vector
 from .reward import RewardWeights, acls_rule_action
 from .types import ObservationWindow, RhythmScenario
 
@@ -36,6 +36,7 @@ class SelectorReport:
     policy_summary: dict[str, dict[str, float]]
     train_indices: list[int]
     eval_indices: list[int]
+    feature_weights: dict[str, dict[str, float]]
 
 
 def matrix_for_metric(
@@ -221,6 +222,7 @@ def build_selector_report(
         policy_summary=summary,
         train_indices=[int(idx) for idx in train_indices],
         eval_indices=[int(idx) for idx in eval_indices],
+        feature_weights=linucb_feature_weights(model),
     )
 
 
@@ -257,6 +259,7 @@ def save_selector_report(
                 "train_indices": report.train_indices,
                 "eval_indices": report.eval_indices,
                 "policy_summary": report.policy_summary,
+                "feature_weights": report.feature_weights,
             },
             indent=2,
             sort_keys=True,
@@ -280,6 +283,19 @@ def save_selector_report(
             writer.writeheader()
             for policy, values in report.policy_summary.items():
                 writer.writerow({"policy": policy, **{metric: values[metric] for metric in metrics}})
+
+
+def linucb_feature_weights(model: LinUCB) -> dict[str, dict[str, float]]:
+    """Return the learned linear reward weights for each stimulation action."""
+
+    weights: dict[str, dict[str, float]] = {}
+    for action_idx, algorithm in enumerate(ALGORITHM_ORDER):
+        theta = np.linalg.inv(model.a[action_idx]) @ model.b[action_idx]
+        weights[algorithm] = {
+            feature: float(theta[feature_idx])
+            for feature_idx, feature in enumerate(FEATURE_VECTOR_KEYS)
+        }
+    return weights
 
 
 def decision_boundary_grid(
