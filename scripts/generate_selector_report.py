@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from vanderpol.reporting import build_selector_report, save_selector_report
+from vanderpol.reward import RewardWeights
 
 
 def main() -> None:
@@ -17,6 +18,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--horizon-s", type=float, default=30.0)
     parser.add_argument("--n-jobs", default=1)
+    parser.add_argument("--success-bonus", type=float, default=100.0)
+    parser.add_argument("--energy-weight", type=float, default=0.0)
+    parser.add_argument("--time-weight", type=float, default=1.0)
+    parser.add_argument("--safety-weight", type=float, default=0.0)
     parser.add_argument("--output-json", type=Path, default=Path("outputs/selector_report.json"))
     parser.add_argument("--output-csv", type=Path, default=Path("outputs/selector_report.csv"))
     args = parser.parse_args()
@@ -26,6 +31,12 @@ def main() -> None:
         train_fraction=args.train_fraction,
         seed=args.seed,
         horizon_s=args.horizon_s,
+        weights=RewardWeights(
+            success_bonus=args.success_bonus,
+            energy_weight=args.energy_weight,
+            time_weight=args.time_weight,
+            safety_weight=args.safety_weight,
+        ),
         n_jobs=args.n_jobs,
     )
     save_selector_report(report, args.output_json, args.output_csv)
