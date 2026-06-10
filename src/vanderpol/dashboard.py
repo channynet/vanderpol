@@ -21,6 +21,8 @@ from .stage8 import friendly_step_name, load_bundle_config
 
 
 RUN_LABELS_FILE = "run_labels.json"
+PAPER_COMPENDIUM_FILE = "docs/paper_all_data.md"
+ARTIFACT_SUFFIXES = {".json", ".jsonl", ".csv", ".md", ".png", ".jpg", ".jpeg", ".html", ".log", ".txt"}
 
 
 def list_runs(runs_dir: str | Path = "outputs/runs") -> list[dict[str, Any]]:
@@ -34,8 +36,8 @@ def list_runs(runs_dir: str | Path = "outputs/runs") -> list[dict[str, Any]]:
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     ):
-        progress = load_run_progress(run_dir)
-        artifacts = load_run_artifacts(run_dir)
+        progress = _load_run_progress_summary(run_dir)
+        artifact_summary = _summarize_run_artifacts(run_dir)
         rows.append(
             {
                 "run_id": run_dir.name,
@@ -47,8 +49,8 @@ def list_runs(runs_dir: str | Path = "outputs/runs") -> list[dict[str, Any]]:
                 "display_progress_fraction": progress.get("display_progress_fraction", progress.get("progress_fraction", 0.0)),
                 "heartbeat_at": progress.get("heartbeat_at") or progress.get("updated_at"),
                 "updated_at": progress.get("updated_at") or progress.get("created_at_utc"),
-                "artifact_count": len(artifacts),
-                "categories": _artifact_category_counts(artifacts),
+                "artifact_count": artifact_summary["count"],
+                "categories": artifact_summary["categories"],
             }
         )
     return rows
@@ -78,6 +80,26 @@ def load_run_progress(run_dir: str | Path) -> dict[str, Any]:
     snapshot["classification"] = classify_snapshot(snapshot)
     _attach_latest_detail(snapshot, run_dir)
     _attach_progress_estimates(snapshot, run_dir)
+    return snapshot
+
+
+def _load_run_progress_summary(run_dir: str | Path) -> dict[str, Any]:
+    run_dir = Path(run_dir)
+    snapshot = load_json(run_dir / "current_progress.json")
+    if snapshot is None:
+        snapshot = load_json(run_dir / "run_progress.json")
+    if snapshot is None:
+        snapshot = load_json(run_dir / "run_manifest.json")
+    if snapshot is None:
+        snapshot = {}
+    snapshot.setdefault("schema_version", SCHEMA_VERSION)
+    snapshot.setdefault("run_id", run_dir.name)
+    snapshot.setdefault("run_dir", str(run_dir))
+    snapshot["display_name"] = _run_display_name(run_dir, snapshot)
+    if snapshot.get("current_step"):
+        snapshot["current_step_label"] = snapshot.get("current_step_label") or friendly_step_name(str(snapshot["current_step"]))
+    snapshot["classification"] = classify_snapshot(snapshot)
+    snapshot["display_progress_fraction"] = snapshot.get("display_progress_fraction", snapshot.get("progress_fraction", 0.0))
     return snapshot
 
 
@@ -182,6 +204,40 @@ def load_run_storage(run_dir: str | Path) -> dict[str, Any]:
         "categories": _artifact_category_counts(artifacts),
         "important_files": files,
         "artifacts_by_category": grouped,
+    }
+
+
+def load_paper_compendium(path: str | Path = PAPER_COMPENDIUM_FILE) -> dict[str, Any]:
+    path = Path(path)
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.exists() or not path.is_file():
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "exists": False,
+            "path": str(path),
+            "title": "Paper Data Compendium",
+            "run_id": None,
+            "source_dir": None,
+            "sections": [],
+            "markdown": "",
+            "size_bytes": None,
+            "modified_at": None,
+        }
+
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    stat = path.stat()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "exists": True,
+        "path": str(path),
+        "title": _paper_compendium_title(text),
+        "run_id": _paper_compendium_value(text, "Run ID:"),
+        "source_dir": _paper_compendium_value(text, "Source directory:"),
+        "sections": _paper_compendium_sections(text),
+        "markdown": text,
+        "size_bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
     }
 
 
@@ -293,6 +349,11 @@ def render_dashboard_html() -> str:
     .run:hover, .run.active { background: var(--color-lightprimary); color: var(--color-primary); border-color: transparent; }
     .runSelectorGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
     .runSelectorGrid .run { margin-bottom: 0; min-height: 112px; }
+    .runGroup { margin-bottom: 1.25rem; }
+    .runGroupHeader { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 0 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); }
+    .runGroupHeader h6 { margin: 0; font-weight: 700; color: var(--color-dark); }
+    .runGroupHeader p { margin: 2px 0 0; }
+    .runGroupCount { white-space: nowrap; }
     .runMiniProgress { height: 4px; border-radius: 999px; background: var(--color-bordergray); overflow: hidden; margin-top: 8px; }
     .runMiniFill { height: 100%; background: var(--color-primary); }
     .runPath { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -343,6 +404,9 @@ def render_dashboard_html() -> str:
     .jsonTree details { margin-left: 12px; }
     .jsonTree summary { cursor: pointer; }
     .mdPreview { line-height: 1.5; max-width: 920px; }
+    .mdBullet { margin: 6px 0; }
+    .paperMeta code { white-space: normal; word-break: break-word; }
+    .paperSections { max-height: 260px; }
     .missing { color: var(--color-error); }
     @media (max-width: 1299px) { .page-wrapper { margin-left: 0; } }
     @media (max-width: 980px) { .workflow { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ux-split, .storageGrid { grid-template-columns: 1fr; } }
@@ -368,6 +432,7 @@ def render_dashboard_html() -> str:
               <div class="caption"><i class="ti ti-dots nav-small-cap-icon"></i><span class="hide-menu">Run Workflow</span></div>
               <li class="sidebar-item"><button type="button" class="sidebar-link dark-sidebar-link active activemenu" data-tab="runs"><i class="ti ti-folders text-xl shrink-0"></i><span class="hide-menu shrink-0">Runs</span></button></li>
               <li class="sidebar-item"><button type="button" class="sidebar-link dark-sidebar-link" data-tab="intermediate"><i class="ti ti-chart-dots text-xl shrink-0"></i><span class="hide-menu shrink-0">Intermediate Results</span></button></li>
+              <li class="sidebar-item"><button type="button" class="sidebar-link dark-sidebar-link" data-tab="paper"><i class="ti ti-notebook text-xl shrink-0"></i><span class="hide-menu shrink-0">Paper Data</span></button></li>
               <li class="sidebar-item"><button type="button" class="sidebar-link dark-sidebar-link" data-tab="final"><i class="ti ti-presentation-analytics text-xl shrink-0"></i><span class="hide-menu shrink-0">Final Results</span></button></li>
               <li class="sidebar-item"><button type="button" class="sidebar-link dark-sidebar-link" data-tab="method"><i class="ti ti-adjustments text-xl shrink-0"></i><span class="hide-menu shrink-0">Run Settings</span></button></li>
               <div class="caption mt-8"><i class="ti ti-dots nav-small-cap-icon"></i><span class="hide-menu">Support</span></div>
@@ -478,6 +543,7 @@ def render_dashboard_html() -> str:
 
           <div class="panel card dashboard-panel" id="panel-analysis"><div class="card-body"><h5 class="card-title mb-4">Analysis Run</h5><div id="steps"></div><h5 class="card-title mt-6 mb-4">Deep Progress</h5><pre id="detail">{}</pre><h5 class="card-title mt-6 mb-4">Recent Events</h5><pre id="events"></pre><h5 class="card-title mt-6 mb-4">Failure Triage</h5><pre id="failure"></pre><h5 class="card-title mt-6 mb-4">Safe Controls</h5><p class="text-bodytext mb-4">Pause means safe stop at the next checkpoint. It does not suspend process memory.</p><div class="actions"><button class="btn-danger" id="stopRun">Request Safe Stop</button><button class="btn" id="resumeRun">Resume Selected Run</button></div><h5 class="card-title mt-6 mb-4">Start New Run</h5><div class="inputRow"><input id="newRunId" class="form-control slim" placeholder="new_run_id"><button class="btn" id="startRun">Start From Settings</button></div><pre id="controlOut" class="mt-4">{}</pre></div></div>
           <div class="panel card dashboard-panel" id="panel-intermediate"><div class="card-body"><h5 class="card-title mb-4">Intermediate Results</h5><div id="intermediateReview" class="ux-grid"></div></div></div>
+          <div class="panel card dashboard-panel" id="panel-paper"><div class="card-body"><div class="flex flex-wrap items-start justify-between gap-3 mb-4"><div><h5 class="card-title mb-1">Paper Data Compendium</h5><p class="text-sm text-bodytext">Manuscript-facing summary, tables, evidence sources, and limitations.</p></div><button class="btn" id="reloadPaperCompendium">Reload</button></div><div class="guardrail">Paper data is generated from simulator artifacts. Keep the clinical guardrails visible when moving this into a draft.</div><div id="paperCompendium"><span class="muted">Open this tab to load the paper data compendium.</span></div></div></div>
           <div class="panel card dashboard-panel" id="panel-final"><div class="card-body"><h5 class="card-title mb-4">Final Results</h5><div class="guardrail">This page summarizes simulator evidence only. Do not interpret it as clinical efficacy.</div><div id="finalResults"></div></div></div>
           <div class="panel card dashboard-panel" id="panel-system"><div class="card-body"><h5 class="card-title mb-4">System</h5><h5 class="card-title mb-4">Run Storage</h5><div id="runStorageSystem" class="mb-6"></div><h5 class="card-title mt-6 mb-4">All Outputs</h5><div id="artifactSummary" class="artifactSummary"></div><div class="filterbar mb-4"><select id="artifactCategoryFilter"><option value="">All categories</option></select><select id="artifactStepFilter"><option value="">All steps</option></select><select id="artifactKindFilter"><option value="">All kinds</option></select><select id="artifactStatusFilter"><option value="">All status</option><option value="final">Final</option><option value="partial">Partial</option></select><input id="artifactSearch" class="form-control slim" placeholder="Search filename or path"></div><h5 class="card-title mt-6 mb-4">Image Gallery</h5><div id="imageGallery" class="gallery"></div><h5 class="card-title mt-6 mb-4">All Outputs By Step</h5><div id="artifacts"></div><h5 class="card-title mt-6 mb-4">Preview</h5><div id="artifactPreview" class="viewer"><span class="muted">Select an artifact preview button.</span></div><h5 class="card-title mt-6 mb-4">Live Scalar Metrics</h5><canvas id="chart" width="900" height="260"></canvas><h5 class="card-title mt-6 mb-4">Resource Diagnostics</h5><pre id="diagnostics">{}</pre><h5 class="card-title mt-6 mb-4">Provenance</h5><pre id="provenance">{}</pre></div></div>
         </div>
@@ -491,6 +557,7 @@ let activeTab = 'runs';
 let latestProgress = null;
 let latestArtifacts = [];
 let latestRuns = [];
+let latestPaperCompendium = null;
 let lastArtifactRenderKey = '';
 let lastImportantRenderKey = '';
 const SCENARIO_LABELS = {
@@ -510,11 +577,11 @@ const ACTION_LABELS = {
 const STEP_LABELS = {
   phase2_figures: 'stage2 - run별 중간 성능 그림을 만드는 단계',
   calibration_report: 'stage3 - 데이터 생성 기준을 검증하는 단계',
-  selector_report: 'stage5 - AI가 파형 특징으로 치료 판단을 학습하는 단계',
-  decision_boundary: 'stage5 - AI 판단 경계를 확인하는 단계',
+  selector_report: 'stage5 - 파형 특징으로 치료 선택 정책을 학습하는 단계',
+  decision_boundary: 'stage5 - 치료 선택 경계를 확인하는 단계',
   bootstrap_ci: 'stage5 - 최종 정답률의 불확실성을 계산하는 단계',
-  selector_stability: 'stage5 - AI 학습 안정성을 확인하는 단계',
-  noise_ood_sweep: 'stage6 - 노이즈가 들어온 파형에서 AI 판단을 점검하는 단계',
+  selector_stability: 'stage5 - 치료 선택 정책의 안정성을 확인하는 단계',
+  noise_ood_sweep: 'stage6 - 노이즈가 들어온 파형에서 치료 선택을 점검하는 단계',
   fallback_threshold_sweep: 'stage7 - 낮은 품질 파형의 보수 판단 기준을 찾는 단계',
   paper_artifacts: 'stage9 - 중간 결과와 최종 결과를 화면에 정리하는 단계'
 };
@@ -558,14 +625,49 @@ function setTab(tab) {
 async function loadRuns() {
   const data = await getJSON('/api/runs');
   latestRuns = data;
+  if (currentRun && !data.some(r => r.run_id === currentRun)) currentRun = null;
+  if (!currentRun && data[0]) currentRun = preferredInitialRun(data).run_id;
   const root = document.getElementById('runs');
-  root.innerHTML = data.map(r => {
-    const statusLine = [r.status || 'unknown', stepLabel(r.current_step) || ''].filter(Boolean).join(' - ');
-    const cats = Object.entries(r.categories || {}).map(([k,v]) => `${k}:${v}`).join(' ');
-    return `<button class="run ${r.run_id===currentRun?'active':''}" data-run="${esc(r.run_id)}"><b>${esc(r.display_name || r.run_id)}</b><br><span class="muted">id: ${esc(r.run_id)}</span><span class="muted runPath">${esc(r.run_dir || '')}</span><span class="muted">${esc(statusLine)}</span><br><span class="muted">${Number(r.artifact_count || 0)} outputs ${esc(cats)}</span><div class="runMiniProgress" aria-label="run progress"><div class="runMiniFill" style="width:${pct(r.display_progress_fraction || r.progress_fraction)}"></div></div></button>`;
-  }).join('');
-  root.querySelectorAll('button').forEach(b => b.onclick = () => { currentRun = b.dataset.run; lastArtifactRenderKey = ''; lastImportantRenderKey = ''; refresh(); });
-  if (!currentRun && data[0]) { currentRun = data[0].run_id; }
+  root.innerHTML = runGroupsHTML(data);
+  root.querySelectorAll('.run').forEach(b => b.onclick = () => { currentRun = b.dataset.run; lastArtifactRenderKey = ''; lastImportantRenderKey = ''; refresh(); });
+}
+function runGroupsHTML(data) {
+  const groups = [
+    ['paper', 'Paper-ready runs', 'Final result and manuscript artifacts are present.'],
+    ['active', 'Active or stalled runs', 'Runs that are still running, stale, or need attention.'],
+    ['completed', 'Completed runs', 'Finished runs without a paper artifact bundle.'],
+    ['stopped', 'Failed or stopped runs', 'Runs that ended before normal completion.'],
+    ['other', 'Other folders and logs', 'Utility folders or runs without progress metadata.']
+  ];
+  const grouped = Object.fromEntries(groups.map(([key]) => [key, []]));
+  (data || []).forEach(run => grouped[runGroupKey(run)].push(run));
+  return groups
+    .filter(([key]) => grouped[key].length)
+    .map(([key, title, description]) => {
+      const rows = grouped[key];
+      return `<section class="runGroup" data-run-group="${attr(key)}"><div class="runGroupHeader"><div><h6>${esc(title)}</h6><p class="muted">${esc(description)}</p></div><span class="badge runGroupCount">${rows.length} runs</span></div><div class="runSelectorGrid">${rows.map(runCardHTML).join('')}</div></section>`;
+    })
+    .join('') || '<p class="muted">No runs found.</p>';
+}
+function runGroupKey(run) {
+  const status = String(run.status || 'unknown').toLowerCase();
+  const categories = run.categories || {};
+  if (categories['Final Results']) return 'paper';
+  if (['running', 'stale', 'stalled'].includes(status)) return 'active';
+  if (status === 'completed') return 'completed';
+  if (['failed', 'stopped'].includes(status)) return 'stopped';
+  return 'other';
+}
+function runCardHTML(r) {
+  const statusLine = [r.status || 'unknown', stepLabel(r.current_step) || ''].filter(Boolean).join(' - ');
+  const cats = Object.entries(r.categories || {}).map(([k,v]) => `${k}:${v}`).join(' ');
+  return `<button class="run ${r.run_id===currentRun?'active':''}" data-run="${esc(r.run_id)}"><b>${esc(r.display_name || r.run_id)}</b><br><span class="muted">id: ${esc(r.run_id)}</span><span class="muted runPath">${esc(r.run_dir || '')}</span><span class="muted">${esc(statusLine)}</span><br><span class="muted">${Number(r.artifact_count || 0)} outputs ${esc(cats)}</span><div class="runMiniProgress" aria-label="run progress"><div class="runMiniFill" style="width:${pct(r.display_progress_fraction || r.progress_fraction)}"></div></div></button>`;
+}
+function preferredInitialRun(data) {
+  return data.find(r => (r.categories || {})['Final Results'] && r.status === 'completed')
+    || data.find(r => (r.categories || {})['Final Results'])
+    || data.find(r => r.status && r.status !== 'unknown')
+    || data[0];
 }
 function selectedRunMeta() {
   return latestRuns.find(r => r.run_id === currentRun) || {};
@@ -612,11 +714,10 @@ function stepsHTML(steps, order) {
 function workflowHTML(p, artifacts) {
   const names = new Set((artifacts || []).map(a => a.name || ''));
   const hasIntermediate = names.has('intermediate_results.html') || names.has('intermediate_waveforms.svg') || names.has('phase2_matrix_summary.csv');
-  const hasFinal = names.has('final_results.html') || names.has('selector_report.json') || names.has('final_visual_summary.svg');
+  const hasFinal = names.has('final_results.html') || names.has('final_visual_summary.svg');
   const steps = [
     ['Run Settings', Boolean(p?.config), 'parameters'],
     ['Intermediate Results', hasIntermediate, 'waveforms and generated data'],
-    ['AI Learning', names.has('selector_report.json'), stepLabel('selector_report')],
     ['Final Results', hasFinal, 'accuracy and feature weights']
   ];
   return steps.map(([label, ready, meta]) => `<div class="workflowStep ${ready ? 'ready' : ''}"><b>${esc(label)}</b>${esc(meta)}</div>`).join('');
@@ -664,8 +765,7 @@ function intermediateReviewHTML(run) {
   return [
     reviewCardHTML(run, 'Representative Waveforms', ['intermediate_waveforms.svg','intermediate_results.html'], 'Approximate waveform preview for each generated rhythm scenario.', ['waveform_preview_seed','observation_s']),
     reviewCardHTML(run, 'Data Generation', ['calibration_report.json','phase2_matrix_summary.csv'], 'How the synthetic run data was sampled, simulated, calibrated, and summarized.', ['patients_per_scenario','horizon_s','calibration_config']),
-    reviewCardHTML(run, 'Intermediate Figures', ['phase2_mean_reward.png','phase2_success_rate.png','phase2_mean_time_s.png'], 'Per-scenario intermediate images before the final AI judgement is summarized.', ['reward_weights']),
-    reviewCardHTML(run, 'Feature Extraction', ['selector_report.json','decision_boundary.png'], 'The ECG-derived features that become AI inputs before the final decision.', ['train_fraction','selector_seed','decision_grid_size'])
+    reviewCardHTML(run, 'Intermediate Figures', ['phase2_mean_reward.png','phase2_success_rate.png','phase2_mean_time_s.png'], 'Per-scenario intermediate images before final policy checks.', ['reward_weights'])
   ].join('');
 }
 async function textArtifact(run, name, preferPaper=false) {
@@ -680,20 +780,47 @@ async function finalResultsHTML(run) {
   if (selectorText) {
     try {
       const policies = JSON.parse(selectorText).policy_summary || {};
-      const rows = ['selector_linucb','conservative_selector','acls_rule','oracle'].filter(k => policies[k]).map(k => {
+      const rows = ['acls_rule','oracle'].filter(k => policies[k]).map(k => {
         const m = policies[k];
         return `<tr><td>${esc(k)}</td><td>${Number(m.mean_reward).toFixed(3)}</td><td>${Number(m.oracle_gap).toFixed(3)}</td><td>${Number(m.success_rate).toFixed(3)}</td><td>${Number(m.mean_safety_violations).toFixed(3)}</td></tr>`;
       }).join('');
       headline = `<table><thead><tr><th>Policy</th><th>Reward</th><th>Oracle Gap</th><th>Success</th><th>Safety</th></tr></thead><tbody>${rows}</tbody></table>`;
     } catch {}
   }
-  return `<div class="ux-grid"><div class="ux-card"><h6>AI Judgement Accuracy</h6>${headline}</div><div class="ux-card"><h6>Symptom-Level Final Decision</h6>${artifactPill(run, winners, winners?.name || 'winner table')} ${artifactPill(run, artifactByName(latestArtifacts, 'final_results.html', true), 'final_results.html')}<p class="muted mt-3">Estimated correctness when the selector receives waveform-derived features without being handed the disease label.</p></div><div class="ux-card"><h6>Waveform Analysis Weights</h6>${artifactPill(run, artifactByName(latestArtifacts, 'waveform_analysis_weights.svg', true), 'weights image')} ${artifactPill(run, artifactByName(latestArtifacts, 'decision_boundary.png'), 'decision boundary')}<p class="muted mt-3">Shows which extracted waveform features most influence treatment selection.</p></div><div class="ux-card"><h6>Robustness And Confidence</h6>${artifactPill(run, artifactByName(latestArtifacts, 'noise_ood_sweep.csv'), 'noise check')} ${artifactPill(run, artifactByName(latestArtifacts, 'bootstrap_matrix_ci.csv'), 'uncertainty')} ${artifactPill(run, artifactByName(latestArtifacts, 'selector_stability.json'), 'stability')}<p class="muted mt-3">Claims stay bounded to simulator evidence.</p></div></div>`;
+  return `<div class="ux-grid"><div class="ux-card"><h6>Policy Baselines</h6>${headline}</div><div class="ux-card"><h6>Symptom-Level Final Decision</h6>${artifactPill(run, winners, winners?.name || 'winner table')} ${artifactPill(run, artifactByName(latestArtifacts, 'final_results.html', true), 'final_results.html')}<p class="muted mt-3">Estimated treatment success from the scenario-by-algorithm matrix.</p></div><div class="ux-card"><h6>Waveform Analysis Weights</h6>${artifactPill(run, artifactByName(latestArtifacts, 'waveform_analysis_weights.svg', true), 'weights image')} ${artifactPill(run, artifactByName(latestArtifacts, 'decision_boundary.png'), 'decision boundary')}<p class="muted mt-3">Shows which extracted waveform features influence treatment selection.</p></div><div class="ux-card"><h6>Robustness And Confidence</h6>${artifactPill(run, artifactByName(latestArtifacts, 'noise_ood_sweep.csv'), 'noise check')} ${artifactPill(run, artifactByName(latestArtifacts, 'bootstrap_matrix_ci.csv'), 'uncertainty')} ${artifactPill(run, artifactByName(latestArtifacts, 'selector_stability.json'), 'stability')}<p class="muted mt-3">Claims stay bounded to simulator evidence.</p></div></div>`;
 }
 function paperResultHTML(run) {
   const paperItems = latestArtifacts.filter(a => (a.relative_path || '').startsWith('paper_artifacts'));
   if (!paperItems.length) return '<p class="muted">No final result folder found for this run yet.</p>';
   const preferred = ['intermediate_results.html','intermediate_waveforms.svg','final_results.html','final_visual_summary.png','final_visual_summary.svg','waveform_analysis_weights.svg','policy_comparison.png','policy_comparison.svg','treatment_success_heatmap.png','treatment_success_heatmap.svg','visual_report.html'];
   return `<div class="ux-grid">${preferred.map(name => `<div class="ux-card"><h6>${esc(name)}</h6>${artifactPill(run, artifactByName(paperItems, name, true), name)}</div>`).join('')}</div>`;
+}
+async function loadPaperCompendium(force=false) {
+  if (latestPaperCompendium && !force) return latestPaperCompendium;
+  latestPaperCompendium = await getJSON('/api/paper-compendium');
+  return latestPaperCompendium;
+}
+async function renderPaperCompendium(force=false) {
+  const root = document.getElementById('paperCompendium');
+  if (!root) return;
+  root.innerHTML = '<span class="muted">Loading paper data compendium...</span>';
+  root.innerHTML = paperCompendiumHTML(await loadPaperCompendium(force));
+}
+function paperCompendiumHTML(data) {
+  if (!data || !data.exists) {
+    return `<div class="resultBlock"><h6>Paper Data Compendium</h6><p class="missing">docs/paper_all_data.md is not available.</p><p class="muted">${esc(data?.path || '')}</p></div>`;
+  }
+  const sections = data.sections || [];
+  const sectionRows = sections.length
+    ? `<div class="csvWrap paperSections"><table><thead><tr><th>Section</th><th>Source</th></tr></thead><tbody>${sections.map(section => `<tr><td>${esc(section.title)}</td><td><code>${esc(section.path)}</code></td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="muted">No section index was found in the compendium.</p>';
+  return `<div class="resultStack">
+    <div class="resultGrid">
+      <div class="resultBlock paperMeta"><h6>${esc(data.title || 'Paper Data Compendium')}</h6><table class="miniTable"><tbody><tr><td>Run ID</td><td><code>${esc(data.run_id || '')}</code></td></tr><tr><td>Source</td><td><code>${esc(data.source_dir || '')}</code></td></tr><tr><td>File</td><td><code>${esc(data.path || '')}</code></td></tr><tr><td>Updated</td><td>${esc(data.modified_at || '')}</td></tr><tr><td>Size</td><td>${formatBytes(data.size_bytes)}</td></tr></tbody></table><div class="actions mt-3"><a class="plain" target="_blank" href="/api/paper-compendium/raw">Open Markdown</a></div></div>
+      <div class="resultBlock"><h6>Included Sections</h6>${sectionRows}</div>
+    </div>
+    <div class="resultBlock"><div class="previewHead"><div><b>Compiled Manuscript Notes</b><br><span class="previewMeta">${esc(sections.length)} sections from the paper artifact set</span></div><a class="plain" target="_blank" href="/api/paper-compendium/raw">Open</a></div>${markdownPreviewHTML(data.markdown || '')}</div>
+  </div>`;
 }
 function artifactLinkActions(run, artifact) {
   if (!artifact) return '';
@@ -739,20 +866,15 @@ async function importantResultsHTML(run) {
   const finalDoc = artifactByName(latestArtifacts, 'final_results.html', true) || artifactByName(latestArtifacts, 'visual_report.html', true);
   const weights = artifactByName(latestArtifacts, 'waveform_analysis_weights.svg', true);
   const heatmap = artifactByName(latestArtifacts, 'treatment_success_heatmap.svg', true) || artifactByName(latestArtifacts, 'treatment_success_heatmap.png', true);
-  const selector = artifactByName(latestArtifacts, 'paper_selector_table.csv', true) || artifactByName(latestArtifacts, 'selector_report.csv');
   const winners = artifactByName(latestArtifacts, 'paper_algorithm_winners.csv', true) || artifactByName(latestArtifacts, 'phase2_matrix_summary.csv');
-  const [selectorText, winnersText] = await Promise.all([
-    artifactTextOrEmpty(run, selector),
-    artifactTextOrEmpty(run, winners)
-  ]);
+  const winnersText = await artifactTextOrEmpty(run, winners);
   return `<div class="resultStack">
     <div class="resultGrid">
       ${resultBlock('Intermediate Results', `${artifactPill(run, intermediateDoc, 'intermediate_results.html')} ${artifactPill(run, waveform, 'waveform image')}<p class="muted mt-3">Run data generation and representative waveform preview.</p>`, run, intermediateDoc || waveform)}
-      ${resultBlock('Final Results', `${artifactPill(run, finalDoc, 'final_results.html')} ${artifactPill(run, weights, 'feature weights')} ${artifactPill(run, heatmap, 'success heatmap')}<p class="muted mt-3">AI judgement accuracy and waveform-analysis weighting.</p>`, run, finalDoc || weights || heatmap)}
+      ${resultBlock('Final Results', `${artifactPill(run, finalDoc, 'final_results.html')} ${artifactPill(run, weights, 'feature weights')} ${artifactPill(run, heatmap, 'success heatmap')}<p class="muted mt-3">Treatment matrix and waveform-analysis outputs.</p>`, run, finalDoc || weights || heatmap)}
     </div>
     <div class="resultBlock"><h6>Intermediate Figures</h6>${figureResultsHTML(run)}</div>
     <div class="resultGrid">
-      ${resultBlock('AI Judgement Summary', selector ? tableArtifactHTML(selector, selectorText, 80) : '', run, selector)}
       ${resultBlock('Symptom-Level Treatment Result', winners ? tableArtifactHTML(winners, winnersText, 80) : '', run, winners)}
     </div>
   </div>`;
@@ -761,7 +883,6 @@ async function renderImportantResults(run, force=false) {
   const importantNames = new Set([
     'intermediate_results.html','intermediate_waveforms.svg','final_results.html','visual_report.html',
     'waveform_analysis_weights.svg','treatment_success_heatmap.svg','treatment_success_heatmap.png',
-    'paper_selector_table.csv','selector_report.csv',
     'paper_algorithm_winners.csv','phase2_matrix_summary.csv','paper_noise_robustness_table.csv',
     'noise_ood_sweep.csv','paper_fallback_sweep_table.csv','fallback_threshold_sweep.csv',
     'phase2_mean_reward.png','phase2_success_rate.png','decision_boundary.png',
@@ -953,7 +1074,7 @@ function markdownPreviewHTML(text) {
     if (line.startsWith('### ')) chunks.push(`<h3>${mdInline(line.slice(4))}</h3>`);
     else if (line.startsWith('## ')) chunks.push(`<h2>${mdInline(line.slice(3))}</h2>`);
     else if (line.startsWith('# ')) chunks.push(`<h2>${mdInline(line.slice(2))}</h2>`);
-    else if (line.startsWith('- ')) chunks.push(`<p>• ${mdInline(line.slice(2))}</p>`);
+    else if (line.startsWith('- ')) chunks.push(`<p class="mdBullet"><span class="muted">- </span>${mdInline(line.slice(2))}</p>`);
     else chunks.push(`<p>${mdInline(line)}</p>`);
     i++;
   }
@@ -990,6 +1111,9 @@ function drawChart(metrics) {
 async function refresh() {
   document.getElementById('clock').textContent = new Date().toLocaleString();
   await loadRuns();
+  if (activeTab === 'paper') {
+    await renderPaperCompendium();
+  }
   if (!currentRun) return;
   const [p, events, metrics, artifacts, failure, storage] = await Promise.all([
     getJSON(`/api/runs/${encodeURIComponent(currentRun)}/progress`),
@@ -1063,6 +1187,7 @@ window.addEventListener('error', event => showUiError(event.error || event.messa
 window.addEventListener('unhandledrejection', event => showUiError(event.reason));
 document.getElementById('refresh').onclick = () => refresh().catch(showUiError);
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+document.getElementById('reloadPaperCompendium').onclick = () => renderPaperCompendium(true).catch(showUiError);
 ['artifactCategoryFilter','artifactStepFilter','artifactKindFilter','artifactStatusFilter','artifactSearch'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('input', () => renderArtifacts(currentRun, true));
@@ -1126,6 +1251,104 @@ def _load_run_labels(runs_dir: Path) -> dict[str, str]:
     if not isinstance(payload, dict):
         return {}
     return {str(key): str(value) for key, value in payload.items() if isinstance(value, str)}
+
+
+def _summarize_run_artifacts(run_dir: Path) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    seen: set[str] = set()
+
+    def add(path: Path, kind: str | None = None) -> None:
+        key = str(path)
+        if key in seen:
+            return
+        seen.add(key)
+        category = _artifact_category_for_summary(path, (kind or path.suffix.lower().lstrip(".") or "file").lower())
+        counts[category] = counts.get(category, 0) + 1
+
+    for artifact in load_jsonl(run_dir / "artifacts.jsonl"):
+        raw_path = artifact.get("path")
+        if not raw_path:
+            continue
+        path = Path(str(raw_path))
+        add(path, str(artifact.get("kind") or path.suffix.lower().lstrip(".") or "file"))
+
+    for path in _discover_artifacts_shallow(run_dir):
+        add(path)
+
+    return {"count": len(seen), "categories": dict(sorted(counts.items()))}
+
+
+def _artifact_category_for_summary(path: Path, kind: str) -> str:
+    name = path.name.lower()
+    parts = {part.lower() for part in path.parts}
+    if "paper_artifacts" in parts or "paper_artifacts_live" in parts:
+        return "Final Results"
+    if "figures" in parts or kind in {"png", "jpg", "jpeg"}:
+        return "Figures"
+    if kind == "csv":
+        return "Tables"
+    if kind in {"log", "txt"} or name.endswith("_stdout.log") or name.endswith("_stderr.log"):
+        return "Logs"
+    if name in {"run_manifest.json", "run_progress.json", "current_progress.json", "events.jsonl", "metrics.jsonl", "artifacts.jsonl"}:
+        return "Run Metadata"
+    if kind in {"json", "jsonl"}:
+        return "Reports"
+    if kind in {"md", "html"}:
+        return "Documents"
+    return "Other"
+
+
+def _discover_artifacts_shallow(run_dir: Path) -> list[Path]:
+    paths: list[Path] = []
+    folders = [run_dir]
+    for folder_name in ("paper_artifacts", "paper_artifacts_live", "figures", "logs", "configs"):
+        folder = run_dir / folder_name
+        if folder.exists() and folder.is_dir():
+            folders.append(folder)
+    for folder in folders:
+        try:
+            children = list(folder.iterdir())
+        except OSError:
+            continue
+        paths.extend(path for path in children if path.is_file() and path.suffix.lower() in ARTIFACT_SUFFIXES)
+    return paths
+
+
+def _paper_compendium_title(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip() or "Paper Data Compendium"
+    return "Paper Data Compendium"
+
+
+def _paper_compendium_value(text: str, prefix: str) -> str | None:
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            value = line.removeprefix(prefix).strip()
+            if value.startswith("`") and value.endswith("`"):
+                return value[1:-1]
+            return value or None
+    return None
+
+
+def _paper_compendium_sections(text: str) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    in_section_index = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "## Included Sections":
+            in_section_index = True
+            continue
+        if in_section_index and (stripped == "---" or stripped.startswith("## ")):
+            break
+        if not in_section_index or not stripped.startswith("- "):
+            continue
+        label, _, raw_path = stripped[2:].partition(":")
+        section_path = raw_path.strip()
+        if section_path.startswith("`") and section_path.endswith("`"):
+            section_path = section_path[1:-1]
+        sections.append({"title": label.strip(), "path": section_path})
+    return sections
 
 
 def _run_display_name(run_dir: Path, snapshot: dict[str, Any] | None = None, labels: dict[str, str] | None = None) -> str:

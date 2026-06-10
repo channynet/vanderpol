@@ -24,6 +24,7 @@ from vanderpol.dashboard import (  # noqa: E402
     dry_run_estimate,
     list_runs,
     load_failure,
+    load_paper_compendium,
     load_run_artifacts,
     load_run_diagnostics,
     load_run_events,
@@ -87,6 +88,14 @@ def _handler_factory(runs_dir: Path) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/dry-run":
                     config_path = query.get("config", ["configs/bundle_smoke.json"])[0]
                     _send_json(self, dry_run_estimate(config_path))
+                elif path == "/api/paper-compendium":
+                    _send_json(self, load_paper_compendium())
+                elif path == "/api/paper-compendium/raw":
+                    compendium = load_paper_compendium()
+                    if not compendium.get("exists"):
+                        _send_json(self, {"error": "paper compendium not found"}, HTTPStatus.NOT_FOUND)
+                    else:
+                        _send_bytes(self, str(compendium.get("markdown") or "").encode("utf-8"), "text/markdown; charset=utf-8")
                 elif path == "/api/artifact":
                     self._handle_artifact(query)
                 elif path == "/api/log":

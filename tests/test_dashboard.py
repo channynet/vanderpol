@@ -10,6 +10,7 @@ from vanderpol.dashboard import (
     compare_runs,
     dry_run_estimate,
     list_runs,
+    load_paper_compendium,
     load_run_artifacts,
     load_run_progress,
     load_run_storage,
@@ -28,6 +29,11 @@ class DashboardTests(unittest.TestCase):
             "Final Results",
             "Run Selector",
             "Run Storage",
+            "Paper-ready runs",
+            "Active or stalled runs",
+            "Other folders and logs",
+            "Paper Data",
+            "Paper Data Compendium",
             "Intermediate / Final Results",
             "All Outputs",
             "All Outputs By Step",
@@ -35,13 +41,15 @@ class DashboardTests(unittest.TestCase):
             "stage9 - 중간 결과와 최종 결과를 화면에 정리하는 단계",
         ):
             self.assertIn(label, html)
-        for tab in ("runs", "method", "intermediate", "final", "system"):
+        for tab in ("runs", "method", "intermediate", "paper", "final", "system"):
             self.assertIn(f'data-tab="{tab}"', html)
             self.assertIn(f'id="panel-{tab}"', html)
-        for endpoint in ("/api/runs", "/api/compare", "/api/dry-run", "/api/artifact"):
+        for endpoint in ("/api/runs", "/api/compare", "/api/dry-run", "/api/paper-compendium", "/api/artifact"):
             self.assertIn(endpoint, html)
         self.assertIn("artifactCategoryFilter", html)
+        self.assertIn("paperCompendium", html)
         self.assertIn("keyResults", html)
+        self.assertIn("runGroupsHTML", html)
         self.assertIn("runMiniProgress", html)
         for removed_text in (
             "Analysis Workflow",
@@ -92,6 +100,41 @@ class DashboardTests(unittest.TestCase):
             payload, mime = artifact_response(run_dir, str(artifact))
             self.assertEqual(payload, b"name,value\nx,1\n")
             self.assertIn(mime, {"text/csv", "application/vnd.ms-excel"})
+
+    def test_load_paper_compendium_extracts_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper_all_data.md"
+            path.write_text(
+                "\n".join(
+                    [
+                        "\ufeff# Stage 9 n20 Paper Data Compendium",
+                        "",
+                        "Run ID: `stage9_n20`",
+                        "Source directory: `outputs/runs/stage9_n20/paper_artifacts`",
+                        "",
+                        "## Included Sections",
+                        "",
+                        "- Paper Summary: `outputs/runs/stage9_n20/paper_artifacts/paper_summary.md`",
+                        "- Limitations And Guardrails: `outputs/runs/stage9_n20/paper_artifacts/limitations.md`",
+                        "",
+                        "---",
+                        "",
+                        "## Paper Summary",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            compendium = load_paper_compendium(path)
+            self.assertTrue(compendium["exists"])
+            self.assertEqual(compendium["title"], "Stage 9 n20 Paper Data Compendium")
+            self.assertEqual(compendium["run_id"], "stage9_n20")
+            self.assertEqual(compendium["source_dir"], "outputs/runs/stage9_n20/paper_artifacts")
+            self.assertEqual(compendium["sections"][0]["title"], "Paper Summary")
+            self.assertIn("markdown", compendium)
+
+            missing = load_paper_compendium(Path(tmp) / "missing.md")
+            self.assertFalse(missing["exists"])
 
     def test_run_labels_are_used_as_display_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

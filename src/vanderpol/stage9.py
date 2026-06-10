@@ -28,6 +28,13 @@ POLICY_ORDER = [
     "always_resonant_drift",
     "always_adaptive",
 ]
+HIDDEN_RESULT_POLICIES = {
+    "selector_linucb",
+    "conservative_selector",
+}
+DISPLAY_POLICY_ORDER = [
+    policy for policy in POLICY_ORDER if policy not in HIDDEN_RESULT_POLICIES
+]
 
 POLICY_LABELS = {
     "selector_linucb": "Selector LinUCB",
@@ -94,7 +101,7 @@ def generate_result_artifacts(
                 rows,
                 output_dir / "paper_selector_table.csv",
                 output_dir / "paper_selector_table.md",
-                "Selector Policy Summary",
+                "Policy Baseline Summary",
             )
         )
     else:
@@ -255,7 +262,7 @@ def generate_paper_artifacts(
 def selector_policy_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
     policies = report.get("policy_summary", {})
     rows = []
-    for name in _ordered_keys(policies, POLICY_ORDER):
+    for name in _display_policy_keys(policies):
         metrics = policies[name]
         row = {"policy": POLICY_LABELS.get(name, name), "policy_id": name}
         row.update({field: metrics.get(field) for field in METRIC_FIELDS})
@@ -313,6 +320,8 @@ def noise_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
         profile_name = profile.get("name", "")
         n_contexts = item.get("n_contexts", "")
         for policy_id, metrics in item.get("policies", {}).items():
+            if policy_id in HIDDEN_RESULT_POLICIES:
+                continue
             row = {
                 "profile": profile_name,
                 "policy": POLICY_LABELS.get(policy_id, policy_id),
@@ -332,6 +341,8 @@ def fallback_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
             profile = profile_item.get("profile", {})
             fallback_reasons = _compact_dict(profile_item.get("fallback_reasons", {}))
             for policy_id, metrics in profile_item.get("policies", {}).items():
+                if policy_id in HIDDEN_RESULT_POLICIES:
+                    continue
                 row = {
                     "min_signal_quality": config.get("min_signal_quality"),
                     "high_entropy_threshold": config.get("high_entropy_threshold"),
@@ -409,16 +420,15 @@ def render_paper_summary(
 
     if selector:
         policies = selector.get("policy_summary", {})
-        lines.extend(["## Headline Selector Metrics", ""])
-        for policy_id in ("selector_linucb", "conservative_selector", "acls_rule", "oracle"):
-            if policy_id in policies:
-                metrics = policies[policy_id]
-                lines.append(
-                    f"- {POLICY_LABELS.get(policy_id, policy_id)}: "
-                    f"reward `{_format_cell(metrics.get('mean_reward'))}`, "
-                    f"oracle gap `{_format_cell(metrics.get('oracle_gap'))}`, "
-                    f"success `{_format_cell(metrics.get('success_rate'))}`"
-                )
+        lines.extend(["## Headline Policy Metrics", ""])
+        for policy_id in _display_policy_keys(policies):
+            metrics = policies[policy_id]
+            lines.append(
+                f"- {POLICY_LABELS.get(policy_id, policy_id)}: "
+                f"reward `{_format_cell(metrics.get('mean_reward'))}`, "
+                f"oracle gap `{_format_cell(metrics.get('oracle_gap'))}`, "
+                f"success `{_format_cell(metrics.get('success_rate'))}`"
+            )
         lines.append("")
 
     if calibration:
@@ -645,7 +655,7 @@ def render_intermediate_results_report(
       <figcaption>Representative synthetic ECG observation windows used to create run data.</figcaption>
     </figure>
     <h2>How The Data Was Made</h2>
-    <p>Each run samples rhythm-specific patient parameters, simulates a Gois-Savi / Van der Pol oscillator trace, projects it into an ECG-like lead, then extracts a fixed feature vector for the AI selector.</p>
+    <p>Each run samples rhythm-specific patient parameters, simulates a Gois-Savi / Van der Pol oscillator trace, projects it into an ECG-like lead, then extracts a fixed feature vector for downstream policy checks.</p>
     <table>
       <thead><tr><th>Scenario</th><th>SA Hz</th><th>AV Hz</th><th>HP Hz</th><th>Noise</th><th>Irregularity</th></tr></thead>
       <tbody>{generation_rows}</tbody>
@@ -697,7 +707,7 @@ def render_visual_report(
     config = manifest.get("config", {})
     policies = selector.get("policy_summary", {}) if selector else {}
     headline_cards = []
-    for policy_id in ("selector_linucb", "conservative_selector", "acls_rule", "oracle"):
+    for policy_id in _display_policy_keys(policies)[:4]:
         if policy_id not in policies:
             continue
         metrics = policies[policy_id]
@@ -781,7 +791,7 @@ def render_final_summary_svg(
         _svg_text(66, 178, "These results visualize experimental model behavior, not clinical efficacy.", 18, "#92400e"),
     ]
     x = 44
-    for policy_id in ("selector_linucb", "conservative_selector", "acls_rule", "oracle"):
+    for policy_id in _display_policy_keys(policies)[:4]:
         if policy_id not in policies:
             continue
         metrics = policies[policy_id]
@@ -803,7 +813,7 @@ def render_final_summary_svg(
 def render_policy_comparison_svg(selector: dict[str, Any] | None) -> str:
     width, height = 960, 520
     policies = selector.get("policy_summary", {}) if selector else {}
-    rows = [(policy_id, policies[policy_id]) for policy_id in _ordered_keys(policies, POLICY_ORDER)[:8]]
+    rows = [(policy_id, policies[policy_id]) for policy_id in _display_policy_keys(policies)[:8]]
     elements = [
         _svg_rect(0, 0, width, height, "#ffffff"),
         _svg_text(34, 46, "Policy Comparison", 26, "#172033", weight="700"),
@@ -1113,7 +1123,7 @@ def _try_write_visual_pngs(
     policy_path = output_dir / "policy_comparison.png"
 
     policies = selector.get("policy_summary", {}) if selector else {}
-    policy_ids = [policy for policy in ("selector_linucb", "conservative_selector", "acls_rule", "oracle") if policy in policies]
+    policy_ids = _display_policy_keys(policies)
     fig, axes = plt.subplots(2, 1, figsize=(11, 9), constrained_layout=True)
     if policy_ids:
         success_values = [_to_float(policies[policy].get("success_rate")) for policy in policy_ids]
@@ -1180,7 +1190,7 @@ def _visual_caption(stem: str) -> str:
         "final_visual_summary": "One-page visual summary of policy and symptom-level results.",
         "policy_comparison": "Policy-level comparison of estimated success and reward.",
         "treatment_success_heatmap": "Success-rate heatmap by symptom/rhythm and stimulation action.",
-        "waveform_analysis_weights": "Learned ECG feature weights used by the AI selector.",
+        "waveform_analysis_weights": "Learned ECG feature weights used by the selector.",
     }.get(stem, stem.replace("_", " ").title())
 
 
@@ -1362,6 +1372,14 @@ def _ordered_keys(mapping: dict[str, Any], preferred: list[str]) -> list[str]:
             seen.add(key)
     output.extend(sorted(key for key in mapping if key not in seen))
     return output
+
+
+def _display_policy_keys(mapping: dict[str, Any]) -> list[str]:
+    return [
+        key
+        for key in _ordered_keys(mapping, DISPLAY_POLICY_ORDER)
+        if key not in HIDDEN_RESULT_POLICIES
+    ]
 
 
 def _format_cell(value: Any) -> str:

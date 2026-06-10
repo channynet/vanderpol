@@ -202,10 +202,9 @@ class Stage9Tests(unittest.TestCase):
             self.assertTrue(Path(artifacts["final_visual_summary_svg"]).exists())
             self.assertTrue(Path(artifacts["policy_comparison_svg"]).exists())
             self.assertTrue(Path(artifacts["treatment_success_heatmap_svg"]).exists())
-            self.assertIn(
-                "Selector LinUCB",
-                Path(artifacts["paper_selector_table_md"]).read_text(encoding="utf-8"),
-            )
+            selector_table = Path(artifacts["paper_selector_table_md"]).read_text(encoding="utf-8")
+            self.assertNotIn("Selector LinUCB", selector_table)
+            self.assertIn("Oracle", selector_table)
             self.assertIn(
                 "Intermediate Results",
                 Path(artifacts["intermediate_results_html"]).read_text(encoding="utf-8"),

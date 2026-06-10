@@ -51,11 +51,11 @@ from .stage9 import generate_paper_artifacts
 STEP_DISPLAY_NAMES = {
     "phase2_figures": "stage2 - run별 중간 성능 그림을 만드는 단계",
     "calibration_report": "stage3 - 데이터 생성 기준을 검증하는 단계",
-    "selector_report": "stage5 - AI가 파형 특징으로 치료 판단을 학습하는 단계",
-    "decision_boundary": "stage5 - AI 판단 경계를 확인하는 단계",
+    "selector_report": "stage5 - 파형 특징으로 치료 선택 정책을 학습하는 단계",
+    "decision_boundary": "stage5 - 치료 선택 경계를 확인하는 단계",
     "bootstrap_ci": "stage5 - 최종 정답률의 불확실성을 계산하는 단계",
-    "selector_stability": "stage5 - AI 학습 안정성을 확인하는 단계",
-    "noise_ood_sweep": "stage6 - 노이즈가 들어온 파형에서 AI 판단을 점검하는 단계",
+    "selector_stability": "stage5 - 치료 선택 정책의 안정성을 확인하는 단계",
+    "noise_ood_sweep": "stage6 - 노이즈가 들어온 파형에서 치료 선택을 점검하는 단계",
     "fallback_threshold_sweep": "stage7 - 낮은 품질 파형의 보수 판단 기준을 찾는 단계",
     "paper_artifacts": "stage9 - 중간 결과와 최종 결과를 화면에 정리하는 단계",
 }
