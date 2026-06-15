@@ -11,20 +11,54 @@ Start here:
 
 - [`docs/README.md`](docs/README.md)
 - [`docs/00_start_here.md`](docs/00_start_here.md)
+- [`docs/final_result.md`](docs/final_result.md)
+- [`docs/dashboard_results_share.md`](docs/dashboard_results_share.md)
 - [`docs/03_v001_result_summary.md`](docs/03_v001_result_summary.md)
 - [`docs/04_v001_figure_guide.md`](docs/04_v001_figure_guide.md)
 - [`docs/05_next_work.md`](docs/05_next_work.md)
 
-Current preserved run:
+Current shared result:
+
+- Consolidated dashboard result: `docs/final_result.md`
+- Primary evidence run: `outputs/runs/stage9_n100_time2`
+- Paper-ready runs considered: `71`
+- Completed paper-ready runs: `70`
+
+Current preserved versioned baseline:
 
 - `outputs/versioned_runs/v001_full_pipeline`
 
 Current headline:
 
 - The full pipeline completed successfully.
-- The learned selector beats fixed always-action baselines.
-- The learned selector does not yet beat the ACLS-rule baseline.
-- The main weaknesses are decision-boundary collapse and noise sensitivity.
+- Scenario-specific best algorithms differ, so the selector problem is meaningful.
+- Versioned AI selector runs beat ACLS on average and in `3/4` comparable runs,
+  but not consistently enough for an AI-over-ACLS claim.
+- Real-vs-synthetic ECG mismatch remains a major limitation.
+- Reward, success, and safety are simulator outcomes, not clinical endpoints.
+
+## Share Dashboard Results
+
+The dashboard's shareable result files are:
+
+- [`docs/final_result.md`](docs/final_result.md)
+- [`docs/final_result.json`](docs/final_result.json)
+- [`docs/final_result_runs.csv`](docs/final_result_runs.csv)
+- [`docs/paper_all_data.md`](docs/paper_all_data.md)
+
+Refresh them with:
+
+```powershell
+$env:PYTHONPATH='src'
+python scripts/generate_final_result.py
+```
+
+Open the local dashboard with:
+
+```powershell
+$env:PYTHONPATH='src'
+python scripts/serve_dashboard.py --runs-dir outputs/runs --port 8765
+```
 
 ## Implemented Stage 1
 

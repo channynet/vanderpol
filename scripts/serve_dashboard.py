@@ -23,7 +23,9 @@ from vanderpol.dashboard import (  # noqa: E402
     compare_runs,
     dry_run_estimate,
     list_runs,
+    load_ai_model_run_results,
     load_failure,
+    load_final_result,
     load_paper_compendium,
     load_run_artifacts,
     load_run_diagnostics,
@@ -88,6 +90,9 @@ def _handler_factory(runs_dir: Path) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/dry-run":
                     config_path = query.get("config", ["configs/bundle_smoke.json"])[0]
                     _send_json(self, dry_run_estimate(config_path))
+                elif path == "/api/ai-model-runs":
+                    run_ids = _csv_query(query, "runs")
+                    _send_json(self, load_ai_model_run_results(_versioned_runs_dir(runs_dir), run_ids or None))
                 elif path == "/api/paper-compendium":
                     _send_json(self, load_paper_compendium())
                 elif path == "/api/paper-compendium/raw":
@@ -96,6 +101,14 @@ def _handler_factory(runs_dir: Path) -> type[BaseHTTPRequestHandler]:
                         _send_json(self, {"error": "paper compendium not found"}, HTTPStatus.NOT_FOUND)
                     else:
                         _send_bytes(self, str(compendium.get("markdown") or "").encode("utf-8"), "text/markdown; charset=utf-8")
+                elif path == "/api/final-result":
+                    _send_json(self, load_final_result())
+                elif path == "/api/final-result/raw":
+                    final_result = load_final_result()
+                    if not final_result.get("exists"):
+                        _send_json(self, {"error": "final result not found"}, HTTPStatus.NOT_FOUND)
+                    else:
+                        _send_bytes(self, str(final_result.get("markdown") or "").encode("utf-8"), "text/markdown; charset=utf-8")
                 elif path == "/api/artifact":
                     self._handle_artifact(query)
                 elif path == "/api/log":
@@ -178,7 +191,7 @@ def _handler_factory(runs_dir: Path) -> type[BaseHTTPRequestHandler]:
             requested_path = query.get("path", [None])[0]
             if not run_id or not requested_path:
                 raise ValueError("Missing run or path.")
-            run_dir = _safe_run_dir(runs_dir, run_id)
+            run_dir = _safe_run_dir_any((runs_dir, _versioned_runs_dir(runs_dir)), run_id)
             payload, mime = artifact_response(run_dir, unquote(requested_path))
             _send_bytes(self, payload, mime)
 
@@ -229,6 +242,22 @@ def _safe_run_dir(runs_dir: Path, run_id: str) -> Path:
     if not run_dir.exists() or not run_dir.is_dir():
         raise FileNotFoundError(f"Run not found: {run_id}")
     return run_dir
+
+
+def _versioned_runs_dir(runs_dir: Path) -> Path:
+    if runs_dir.name == "runs":
+        return runs_dir.parent / "versioned_runs"
+    return Path("outputs/versioned_runs").resolve()
+
+
+def _safe_run_dir_any(root_dirs: tuple[Path, ...], run_id: str) -> Path:
+    missing: list[str] = []
+    for root_dir in root_dirs:
+        try:
+            return _safe_run_dir(root_dir.resolve(), run_id)
+        except FileNotFoundError as exc:
+            missing.append(str(exc))
+    raise FileNotFoundError(f"Run not found in known roots: {run_id}; {'; '.join(missing)}")
 
 
 def _safe_file_in_run(run_dir: Path, requested_path: str) -> Path:

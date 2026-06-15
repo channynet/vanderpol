@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from vanderpol.dashboard import (
@@ -10,6 +12,8 @@ from vanderpol.dashboard import (
     compare_runs,
     dry_run_estimate,
     list_runs,
+    load_ai_model_run_results,
+    load_final_result,
     load_paper_compendium,
     load_run_artifacts,
     load_run_progress,
@@ -27,8 +31,10 @@ class DashboardTests(unittest.TestCase):
             "Run Settings",
             "Intermediate Results",
             "Final Results",
+            "Versioned Run Results Across 4 Runs",
             "Run Selector",
             "Run Storage",
+            "Consolidated Final Result",
             "Paper-ready runs",
             "Active or stalled runs",
             "Other folders and logs",
@@ -44,9 +50,13 @@ class DashboardTests(unittest.TestCase):
         for tab in ("runs", "method", "intermediate", "paper", "final", "system"):
             self.assertIn(f'data-tab="{tab}"', html)
             self.assertIn(f'id="panel-{tab}"', html)
-        for endpoint in ("/api/runs", "/api/compare", "/api/dry-run", "/api/paper-compendium", "/api/artifact"):
+        for endpoint in ("/api/runs", "/api/compare", "/api/dry-run", "/api/ai-model-runs", "/api/final-result", "/api/paper-compendium", "/api/artifact"):
             self.assertIn(endpoint, html)
         self.assertIn("artifactCategoryFilter", html)
+        self.assertIn("aiModelRuns", html)
+        self.assertIn("dashboardFinalResult", html)
+        self.assertIn("finalResultSummaryHTML", html)
+        self.assertIn("finalResult", html)
         self.assertIn("paperCompendium", html)
         self.assertIn("keyResults", html)
         self.assertIn("runGroupsHTML", html)
@@ -135,6 +145,114 @@ class DashboardTests(unittest.TestCase):
 
             missing = load_paper_compendium(Path(tmp) / "missing.md")
             self.assertFalse(missing["exists"])
+
+    def test_load_final_result_extracts_markdown_and_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            markdown = root / "final_result.md"
+            payload = root / "final_result.json"
+            markdown.write_text("# Consolidated Final Result\n\nFinal body.\n", encoding="utf-8")
+            payload.write_text(json.dumps({"primary_run": {"run_id": "run-a"}, "run_count": 1}), encoding="utf-8")
+
+            result = load_final_result(markdown, payload)
+            self.assertTrue(result["exists"])
+            self.assertEqual(result["title"], "Consolidated Final Result")
+            self.assertEqual(result["payload"]["primary_run"]["run_id"], "run-a")
+
+            missing = load_final_result(root / "missing.md", root / "missing.json")
+            self.assertFalse(missing["exists"])
+
+    def test_default_final_result_uses_repo_root_not_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other:
+            root = Path(tmp)
+            docs = root / "docs"
+            docs.mkdir()
+            (docs / "final_result.md").write_text("# Consolidated Final Result\n\nFinal body.\n", encoding="utf-8")
+            (docs / "final_result.json").write_text(json.dumps({"primary_run": {"run_id": "repo-run"}}), encoding="utf-8")
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(other)
+                with mock.patch("vanderpol.dashboard.REPO_ROOT", root):
+                    result = load_final_result()
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertTrue(result["exists"])
+            self.assertEqual(result["payload"]["primary_run"]["run_id"], "repo-run")
+            self.assertEqual(Path(result["path"]).parent, docs)
+
+    def test_load_ai_model_run_results_collects_versioned_selector_and_realism_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp)
+            run_dir = runs_dir / "v001_full_pipeline"
+            paper_dir = run_dir / "paper_artifacts"
+            paper_dir.mkdir(parents=True)
+            atomic_write_json(
+                {
+                    "run_id": "v001_full_pipeline",
+                    "run_status": "completed",
+                    "progress_fraction": 1.0,
+                    "config": {
+                        "patients_per_scenario": 1,
+                        "horizon_s": 4.0,
+                        "train_fraction": 0.7,
+                        "decision_grid_size": 12,
+                        "selector_seed": 700,
+                        "selector_stability_seeds": [700, 701],
+                        "noise_profiles": ["clean", "severe"],
+                        "fallback_min_sqi": [0.4],
+                        "fallback_entropy": [0.6],
+                        "fallback_rr_cv": [0.3],
+                    },
+                },
+                run_dir / "run_manifest.json",
+            )
+            atomic_write_json(
+                {
+                    "policy_summary": {
+                        "selector_linucb": {"mean_reward": 98.0, "oracle_gap": 0.0, "success_rate": 1.0, "mean_safety_violations": 0.0},
+                        "acls_rule": {"mean_reward": 95.0, "oracle_gap": 3.0, "success_rate": 1.0},
+                        "oracle": {"mean_reward": 98.0, "oracle_gap": 0.0, "success_rate": 1.0},
+                    }
+                },
+                run_dir / "selector_report.json",
+            )
+            (paper_dir / "paper_algorithm_winners.csv").write_text(
+                "scenario,best_algorithm,mean_reward,success_rate,mean_energy,mean_time_s,mean_safety_violations\n"
+                "vf_like,unsynchronized_defibrillation,98.0,1.0,0.6,1.2,0.0\n",
+                encoding="utf-8",
+            )
+            realism_dir = runs_dir / "v002_existing_rhythm_realism_tuning"
+            comparison_dir = realism_dir / "comparison"
+            comparison_dir.mkdir(parents=True)
+            atomic_write_json(
+                {
+                    "experiment": "existing_rhythm_realism_tuning",
+                    "parameters": {"patients_per_scenario": 200, "observation_s": 4.0},
+                },
+                realism_dir / "version_manifest.json",
+            )
+            atomic_write_json(
+                {"status": "ok", "n_real_rows": 10, "n_synthetic_rows": 20},
+                comparison_dir / "real_vs_synthetic_abnormal_manifest.json",
+            )
+            (comparison_dir / "real_vs_synthetic_abnormal_feature_distances.csv").write_text(
+                "comparison_group,feature,smd_abs,ks_statistic\n"
+                "vt_vs_monomorphic_vt,heart_rate_bpm,0.25,0.3\n"
+                "vt_vs_monomorphic_vt,sample_entropy,1.5,0.8\n",
+                encoding="utf-8",
+            )
+
+            result = load_ai_model_run_results(runs_dir, ["v001_full_pipeline", "v002_existing_rhythm_realism_tuning"])
+            self.assertEqual(result["run_count"], 2)
+            self.assertEqual(result["runs"][0]["selector_model"]["mean_reward"], 98.0)
+            self.assertEqual(result["runs"][1]["realism_comparison"]["max_smd_feature"], "sample_entropy")
+            self.assertEqual(result["scenario_consensus"][0]["consensus_algorithm"], "unsynchronized_defibrillation")
+            self.assertEqual(result["aggregate"]["selector_model_successful_run_count"], 1)
+            self.assertEqual(result["realism_aggregate"]["realism_run_count"], 1)
+            self.assertIn("headline", result["conclusion"])
+            self.assertEqual(result["conclusion"]["selector_evidence"]["reward_delta_vs_acls"], 3.0)
+            self.assertEqual(result["conclusion"]["realism_evidence"]["latest_worst_feature"], "sample_entropy")
 
     def test_run_labels_are_used_as_display_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

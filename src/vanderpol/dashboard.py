@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import mimetypes
 import os
 import subprocess
@@ -22,7 +23,23 @@ from .stage8 import friendly_step_name, load_bundle_config
 
 RUN_LABELS_FILE = "run_labels.json"
 PAPER_COMPENDIUM_FILE = "docs/paper_all_data.md"
+FINAL_RESULT_FILE = "docs/final_result.md"
+FINAL_RESULT_JSON_FILE = "docs/final_result.json"
+DEFAULT_AI_MODEL_RUN_IDS = (
+    "v001_full_pipeline",
+    "v002_existing_rhythm_realism_tuning",
+    "v003_existing_rhythm_realism_tuning_pass2",
+    "v004_existing_rhythm_realism_mitdb_cudb",
+)
 ARTIFACT_SUFFIXES = {".json", ".jsonl", ".csv", ".md", ".png", ".jpg", ".jpeg", ".html", ".log", ".txt"}
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_repo_path(path: str | Path) -> Path:
+    path = Path(path)
+    if path.is_absolute():
+        return path.resolve()
+    return (REPO_ROOT / path).resolve()
 
 
 def list_runs(runs_dir: str | Path = "outputs/runs") -> list[dict[str, Any]]:
@@ -208,9 +225,7 @@ def load_run_storage(run_dir: str | Path) -> dict[str, Any]:
 
 
 def load_paper_compendium(path: str | Path = PAPER_COMPENDIUM_FILE) -> dict[str, Any]:
-    path = Path(path)
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
+    path = _resolve_repo_path(path)
     if not path.exists() or not path.is_file():
         return {
             "schema_version": SCHEMA_VERSION,
@@ -238,6 +253,63 @@ def load_paper_compendium(path: str | Path = PAPER_COMPENDIUM_FILE) -> dict[str,
         "markdown": text,
         "size_bytes": stat.st_size,
         "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
+    }
+
+
+def load_final_result(
+    markdown_path: str | Path = FINAL_RESULT_FILE,
+    json_path: str | Path = FINAL_RESULT_JSON_FILE,
+) -> dict[str, Any]:
+    markdown_path = _resolve_repo_path(markdown_path)
+    json_path = _resolve_repo_path(json_path)
+    if not markdown_path.exists() or not markdown_path.is_file():
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "exists": False,
+            "path": str(markdown_path),
+            "json_path": str(json_path),
+            "title": "Consolidated Final Result",
+            "markdown": "",
+            "payload": {},
+            "size_bytes": None,
+            "modified_at": None,
+        }
+    text = markdown_path.read_text(encoding="utf-8-sig", errors="replace")
+    stat = markdown_path.stat()
+    payload = load_json(json_path) or {}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "exists": True,
+        "path": str(markdown_path),
+        "json_path": str(json_path),
+        "title": _paper_compendium_title(text),
+        "markdown": text,
+        "payload": payload,
+        "size_bytes": stat.st_size,
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
+    }
+
+
+def load_ai_model_run_results(
+    runs_dir: str | Path = "outputs/versioned_runs",
+    run_ids: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    runs_dir = Path(runs_dir)
+    selected_run_ids = list(run_ids or DEFAULT_AI_MODEL_RUN_IDS)
+    runs = [_ai_model_run_summary(runs_dir / run_id) for run_id in selected_run_ids]
+    available_runs = [run for run in runs if run.get("exists")]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "title": "Versioned Run Results Across 4 Runs",
+        "source_dir": str(runs_dir),
+        "requested_run_ids": selected_run_ids,
+        "run_count": len(available_runs),
+        "completed_run_count": sum(1 for run in available_runs if run.get("status") in {"completed", "ok"}),
+        "runs": runs,
+        "aggregate": _ai_model_aggregate(available_runs),
+        "realism_aggregate": _realism_aggregate(available_runs),
+        "scenario_consensus": _ai_model_scenario_consensus(available_runs),
+        "conclusion": _versioned_run_conclusion(available_runs),
     }
 
 
@@ -489,6 +561,16 @@ def render_dashboard_html() -> str:
               <div id="runs" class="runSelectorGrid"></div>
             </div></div>
             <div class="card mb-4"><div class="card-body">
+              <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <div>
+                  <h5 class="card-title mb-1">Consolidated Final Result</h5>
+                  <p class="text-sm text-bodytext">Manuscript-facing result from completed paper-ready runs</p>
+                </div>
+                <button class="btn" id="reloadDashboardFinalResult">Reload Final Result</button>
+              </div>
+              <div id="dashboardFinalResult"><span class="muted">Loading consolidated final result...</span></div>
+            </div></div>
+            <div class="card mb-4"><div class="card-body">
               <h5 class="card-title mb-4">Run Storage</h5>
               <div id="runStorage"></div>
             </div></div>
@@ -543,8 +625,8 @@ def render_dashboard_html() -> str:
 
           <div class="panel card dashboard-panel" id="panel-analysis"><div class="card-body"><h5 class="card-title mb-4">Analysis Run</h5><div id="steps"></div><h5 class="card-title mt-6 mb-4">Deep Progress</h5><pre id="detail">{}</pre><h5 class="card-title mt-6 mb-4">Recent Events</h5><pre id="events"></pre><h5 class="card-title mt-6 mb-4">Failure Triage</h5><pre id="failure"></pre><h5 class="card-title mt-6 mb-4">Safe Controls</h5><p class="text-bodytext mb-4">Pause means safe stop at the next checkpoint. It does not suspend process memory.</p><div class="actions"><button class="btn-danger" id="stopRun">Request Safe Stop</button><button class="btn" id="resumeRun">Resume Selected Run</button></div><h5 class="card-title mt-6 mb-4">Start New Run</h5><div class="inputRow"><input id="newRunId" class="form-control slim" placeholder="new_run_id"><button class="btn" id="startRun">Start From Settings</button></div><pre id="controlOut" class="mt-4">{}</pre></div></div>
           <div class="panel card dashboard-panel" id="panel-intermediate"><div class="card-body"><h5 class="card-title mb-4">Intermediate Results</h5><div id="intermediateReview" class="ux-grid"></div></div></div>
-          <div class="panel card dashboard-panel" id="panel-paper"><div class="card-body"><div class="flex flex-wrap items-start justify-between gap-3 mb-4"><div><h5 class="card-title mb-1">Paper Data Compendium</h5><p class="text-sm text-bodytext">Manuscript-facing summary, tables, evidence sources, and limitations.</p></div><button class="btn" id="reloadPaperCompendium">Reload</button></div><div class="guardrail">Paper data is generated from simulator artifacts. Keep the clinical guardrails visible when moving this into a draft.</div><div id="paperCompendium"><span class="muted">Open this tab to load the paper data compendium.</span></div></div></div>
-          <div class="panel card dashboard-panel" id="panel-final"><div class="card-body"><h5 class="card-title mb-4">Final Results</h5><div class="guardrail">This page summarizes simulator evidence only. Do not interpret it as clinical efficacy.</div><div id="finalResults"></div></div></div>
+          <div class="panel card dashboard-panel" id="panel-paper"><div class="card-body"><div class="flex flex-wrap items-start justify-between gap-3 mb-4"><div><h5 class="card-title mb-1">Consolidated Final Result</h5><p class="text-sm text-bodytext">Consolidated conclusion from completed paper-ready runs, followed by the manuscript data compendium.</p></div><button class="btn" id="reloadPaperCompendium">Reload</button></div><div class="guardrail">Paper data is generated from simulator artifacts. Keep the clinical guardrails visible when moving this into a draft.</div><div id="finalResult"><span class="muted">Open this tab to load the consolidated final result.</span></div><h5 class="card-title mt-6 mb-4">Paper Data Compendium</h5><div id="paperCompendium"><span class="muted">Open this tab to load the paper data compendium.</span></div></div></div>
+          <div class="panel card dashboard-panel" id="panel-final"><div class="card-body"><div class="flex flex-wrap items-start justify-between gap-3 mb-4"><div><h5 class="card-title mb-1">Final Results</h5><p class="text-sm text-bodytext">Versioned run evidence first, selected-run details second.</p></div><button class="btn" id="reloadAiModelRuns">Reload Versioned Runs</button></div><div class="guardrail">This page summarizes simulator evidence only. Do not interpret it as clinical efficacy.</div><div id="aiModelRuns"><span class="muted">Open this tab to load versioned run results.</span></div><h5 class="card-title mt-6 mb-4">Selected Run Results</h5><div id="finalResults"></div></div></div>
           <div class="panel card dashboard-panel" id="panel-system"><div class="card-body"><h5 class="card-title mb-4">System</h5><h5 class="card-title mb-4">Run Storage</h5><div id="runStorageSystem" class="mb-6"></div><h5 class="card-title mt-6 mb-4">All Outputs</h5><div id="artifactSummary" class="artifactSummary"></div><div class="filterbar mb-4"><select id="artifactCategoryFilter"><option value="">All categories</option></select><select id="artifactStepFilter"><option value="">All steps</option></select><select id="artifactKindFilter"><option value="">All kinds</option></select><select id="artifactStatusFilter"><option value="">All status</option><option value="final">Final</option><option value="partial">Partial</option></select><input id="artifactSearch" class="form-control slim" placeholder="Search filename or path"></div><h5 class="card-title mt-6 mb-4">Image Gallery</h5><div id="imageGallery" class="gallery"></div><h5 class="card-title mt-6 mb-4">All Outputs By Step</h5><div id="artifacts"></div><h5 class="card-title mt-6 mb-4">Preview</h5><div id="artifactPreview" class="viewer"><span class="muted">Select an artifact preview button.</span></div><h5 class="card-title mt-6 mb-4">Live Scalar Metrics</h5><canvas id="chart" width="900" height="260"></canvas><h5 class="card-title mt-6 mb-4">Resource Diagnostics</h5><pre id="diagnostics">{}</pre><h5 class="card-title mt-6 mb-4">Provenance</h5><pre id="provenance">{}</pre></div></div>
         </div>
       </main>
@@ -553,11 +635,13 @@ def render_dashboard_html() -> str:
 </main>
 <script>
 let currentRun = null;
-let activeTab = 'runs';
+let activeTab = initialTab();
 let latestProgress = null;
 let latestArtifacts = [];
 let latestRuns = [];
 let latestPaperCompendium = null;
+let latestFinalResult = null;
+let latestAiModelRuns = null;
 let lastArtifactRenderKey = '';
 let lastImportantRenderKey = '';
 const SCENARIO_LABELS = {
@@ -608,8 +692,16 @@ function fmtSeconds(v) {
   if (n < 7200) return (n / 60).toFixed(1) + 'm';
   return (n / 3600).toFixed(1) + 'h';
 }
+function fmtMetric(v, digits=3) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(digits) : '';
+}
 function stepLabel(name) {
   return STEP_LABELS[name] || name || '';
+}
+function initialTab() {
+  const raw = new URLSearchParams(window.location.search).get('tab') || window.location.hash.replace(/^#/, '') || 'runs';
+  return ['runs', 'method', 'intermediate', 'paper', 'final', 'system'].includes(raw) ? raw : 'runs';
 }
 function setTab(tab) {
   activeTab = tab;
@@ -789,6 +881,108 @@ async function finalResultsHTML(run) {
   }
   return `<div class="ux-grid"><div class="ux-card"><h6>Policy Baselines</h6>${headline}</div><div class="ux-card"><h6>Symptom-Level Final Decision</h6>${artifactPill(run, winners, winners?.name || 'winner table')} ${artifactPill(run, artifactByName(latestArtifacts, 'final_results.html', true), 'final_results.html')}<p class="muted mt-3">Estimated treatment success from the scenario-by-algorithm matrix.</p></div><div class="ux-card"><h6>Waveform Analysis Weights</h6>${artifactPill(run, artifactByName(latestArtifacts, 'waveform_analysis_weights.svg', true), 'weights image')} ${artifactPill(run, artifactByName(latestArtifacts, 'decision_boundary.png'), 'decision boundary')}<p class="muted mt-3">Shows which extracted waveform features influence treatment selection.</p></div><div class="ux-card"><h6>Robustness And Confidence</h6>${artifactPill(run, artifactByName(latestArtifacts, 'noise_ood_sweep.csv'), 'noise check')} ${artifactPill(run, artifactByName(latestArtifacts, 'bootstrap_matrix_ci.csv'), 'uncertainty')} ${artifactPill(run, artifactByName(latestArtifacts, 'selector_stability.json'), 'stability')}<p class="muted mt-3">Claims stay bounded to simulator evidence.</p></div></div>`;
 }
+async function loadAiModelRuns(force=false) {
+  if (latestAiModelRuns && !force) return latestAiModelRuns;
+  latestAiModelRuns = await getJSON('/api/ai-model-runs');
+  return latestAiModelRuns;
+}
+async function renderAiModelRuns(force=false) {
+  const root = document.getElementById('aiModelRuns');
+  if (!root) return;
+  root.innerHTML = '<span class="muted">Loading AI model results across four runs...</span>';
+  root.innerHTML = aiModelRunsHTML(await loadAiModelRuns(force));
+}
+function aiModelRunsHTML(data) {
+  if (!data || !data.runs) {
+    return '<div class="resultBlock"><h6>Versioned Run Results Across 4 Runs</h6><p class="muted">No versioned run payload is available.</p></div>';
+  }
+  const runs = data.runs || [];
+  const aggregate = data.aggregate || {};
+  const realismAggregate = data.realism_aggregate || {};
+  const conclusion = data.conclusion || {};
+  const selectorAvg = aggregate.selector_model_average || {};
+  const requested = data.requested_run_ids || [];
+  const attention = aggregate.selector_model_attention_runs || [];
+  const cards = [
+    ['Versioned runs', `${data.run_count || 0}/${requested.length || runs.length}`],
+    ['Completed', data.completed_run_count || 0],
+    ['Selector runs', aggregate.selector_model_run_count || 0],
+    ['Selector success', fmtMetric(selectorAvg.success_rate)],
+    ['Realism runs', realismAggregate.realism_run_count || 0],
+    ['Mean SMD / KS', `${fmtMetric(realismAggregate.mean_smd_abs)} / ${fmtMetric(realismAggregate.mean_ks_statistic)}`],
+    ['Worst mismatch', realismAggregate.worst_run_id ? `${realismAggregate.worst_run_id}: ${realismAggregate.worst_feature}` : 'none'],
+    ['Attention runs', attention.length ? attention.join(', ') : 'none']
+  ].map(([k,v], i) => {
+    const styles = [['bg-lightprimary','text-primary'],['bg-lightsuccess','text-success'],['bg-lightinfo','text-info'],['bg-lightwarning','text-warning'],['bg-lighterror','text-error'],['bg-lightinfo','text-info']];
+    const [bg, text] = styles[i % styles.length];
+    return `<div class="card mb-0 shadow-none ${bg} w-full"><div class="card-body"><p class="font-semibold ${text} mb-1">${esc(k)}</p><h5 class="text-lg font-semibold ${text} mb-0">${esc(v)}</h5></div></div>`;
+  }).join('');
+  const runRows = runs.map(run => {
+    if (!run.exists) return `<tr class="missing"><td><code>${esc(run.run_id)}</code></td><td colspan="12">missing run directory</td></tr>`;
+    const cfg = run.config || {};
+    const selector = run.selector_model || {};
+    const acls = run.acls_rule || {};
+    const oracle = run.oracle || {};
+    const realism = run.realism_comparison || {};
+    return `<tr><td><code>${esc(run.run_id)}</code><br><span class="muted">${esc(run.status || '')}</span></td><td>${esc(run.experiment || cfg.preset || '')}</td><td>${esc(cfg.patients_per_scenario || '')}</td><td>${esc(cfg.horizon_s || '')}</td><td>${fmtMetric(selector.mean_reward)}</td><td>${fmtMetric(selector.oracle_gap)}</td><td>${fmtMetric(selector.success_rate)}</td><td>${fmtMetric(acls.mean_reward)}</td><td>${fmtMetric(oracle.mean_reward)}</td><td>${fmtMetric(realism.mean_smd_abs)}</td><td>${fmtMetric(realism.mean_ks_statistic)}</td><td>${esc(realism.max_smd_feature || '')}</td><td>${aiModelArtifactLinks(run)}</td></tr>`;
+  }).join('');
+  const scenarioRows = (data.scenario_consensus || []).map(row => {
+    const perRun = (row.per_run || []).map(item => `${item.run_id}: ${item.algorithm}`).join(' | ');
+    return `<tr><td>${esc(SCENARIO_LABELS[row.scenario] || row.scenario)}</td><td><code>${esc(row.consensus_algorithm || '')}</code></td><td>${esc(row.agreement || '')}</td><td>${fmtMetric(row.mean_reward)}</td><td>${fmtMetric(row.success_rate)}</td><td><span class="muted">${esc(perRun)}</span></td></tr>`;
+  }).join('');
+  return `<div class="resultStack">
+    ${versionedConclusionHTML(conclusion)}
+    <div class="ta-grid">${cards}</div>
+    <div class="resultBlock"><h6>Versioned Run Summary</h6><div class="csvWrap"><table><thead><tr><th>Run</th><th>Experiment</th><th>Patients</th><th>Horizon / obs</th><th>Selector reward</th><th>Selector gap</th><th>Selector success</th><th>ACLS reward</th><th>Oracle reward</th><th>Mean SMD</th><th>Mean KS</th><th>Worst feature</th><th>Artifacts</th></tr></thead><tbody>${runRows}</tbody></table></div></div>
+    <div class="resultBlock"><h6>Scenario Winners From Selector Runs</h6><div class="csvWrap"><table><thead><tr><th>Scenario</th><th>Consensus action</th><th>Agreement</th><th>Avg reward</th><th>Avg success</th><th>Per-run action</th></tr></thead><tbody>${scenarioRows || '<tr><td colspan="6"><span class="muted">No selector winner tables are present in these versioned runs.</span></td></tr>'}</tbody></table></div></div>
+    <div class="resultGrid">${runs.filter(run => run.exists).map(aiModelRunDetailHTML).join('')}</div>
+  </div>`;
+}
+function versionedConclusionHTML(conclusion) {
+  if (!conclusion || !conclusion.headline) return '';
+  const selector = conclusion.selector_evidence || {};
+  const realism = conclusion.realism_evidence || {};
+  const selectorRunIds = conclusion.selector_run_ids || (conclusion.selector_run_id ? [conclusion.selector_run_id] : []);
+  const selectorRunLabel = selectorRunIds.join(', ');
+  const selectorBeatCount = selector.selector_beats_acls_count == null || selector.selector_comparable_run_count == null ? '' : `${selector.selector_beats_acls_count} / ${selector.selector_comparable_run_count}`;
+  const list = items => (items || []).map(item => `<p class="mdBullet"><span class="muted">- </span>${esc(item)}</p>`).join('');
+  return `<div class="resultBlock"><h6>AI Model Analysis Conclusion</h6><p><b>${esc(conclusion.headline)}</b></p>
+    <div class="resultGrid">
+      <div><h6>Selector Evidence</h6><table class="miniTable"><tbody><tr><td>Selector runs</td><td><code>${esc(selectorRunLabel)}</code></td></tr><tr><td>Runs beating ACLS</td><td>${esc(selectorBeatCount)}</td></tr><tr><td>Selector reward avg</td><td>${fmtMetric(selector.selector_reward)}</td></tr><tr><td>ACLS reward avg</td><td>${fmtMetric(selector.acls_reward)}</td></tr><tr><td>Reward delta vs ACLS</td><td>${fmtMetric(selector.reward_delta_vs_acls)}</td></tr><tr><td>Selector success avg</td><td>${fmtMetric(selector.selector_success_rate)}</td></tr><tr><td>ACLS success avg</td><td>${fmtMetric(selector.acls_success_rate)}</td></tr><tr><td>Selector oracle gap avg</td><td>${fmtMetric(selector.selector_oracle_gap)}</td></tr><tr><td>Oracle reward avg</td><td>${fmtMetric(selector.oracle_reward)}</td></tr></tbody></table></div>
+      <div><h6>Realism Evidence</h6><table class="miniTable"><tbody><tr><td>Latest realism run</td><td><code>${esc(realism.latest_run_id || '')}</code></td></tr><tr><td>Mean SMD change</td><td>${fmtMetric(realism.mean_smd_abs_change)}</td></tr><tr><td>Mean KS change</td><td>${fmtMetric(realism.mean_ks_statistic_change)}</td></tr><tr><td>Latest worst feature</td><td>${esc(realism.latest_worst_group || '')} / ${esc(realism.latest_worst_feature || '')}</td></tr><tr><td>Latest worst SMD</td><td>${fmtMetric(realism.latest_worst_smd_abs)}</td></tr><tr><td>Rows</td><td>${esc(realism.latest_real_rows || '')} real / ${esc(realism.latest_synthetic_rows || '')} synthetic</td></tr></tbody></table></div>
+    </div>
+    <div class="resultGrid mt-3"><div><h6>Claims To Use</h6>${list(conclusion.claims)}</div><div><h6>Limits</h6>${list(conclusion.limitations)}</div><div><h6>Next Analysis</h6>${list(conclusion.next_steps)}</div></div></div>`;
+}
+function aiModelArtifactLinks(run) {
+  return [
+    ['selector_report', 'selector'],
+    ['algorithm_winners', 'winners'],
+    ['algorithm_matrix', 'matrix'],
+    ['feature_weights', 'weights'],
+    ['success_heatmap', 'heatmap'],
+    ['distance_table', 'distance'],
+    ['smd_heatmap', 'smd'],
+    ['ks_heatmap', 'ks'],
+    ['pca_plot', 'pca'],
+    ['interpretation', 'notes']
+  ].map(([key, label]) => aiModelArtifactLink(run, key, label)).join(' ');
+}
+function aiModelArtifactLink(run, key, label) {
+  const artifact = (run.artifacts || {})[key];
+  if (!artifact || !artifact.exists) return `<span class="badge missing">${esc(label)} missing</span>`;
+  const url = `/api/artifact?run=${encodeURIComponent(run.run_id)}&path=${encodeURIComponent(artifact.path)}`;
+  return `<a class="plain" target="_blank" href="${attr(url)}">${esc(label)}</a>`;
+}
+function aiModelRunDetailHTML(run) {
+  const winners = (run.scenario_winners || []).map(row => `<tr><td>${esc(SCENARIO_LABELS[row.scenario] || row.scenario)}</td><td><code>${esc(row.best_algorithm || row.final_action || '')}</code></td><td>${fmtMetric(row.mean_reward)}</td><td>${fmtMetric(row.success_rate)}</td><td>${fmtMetric(row.mean_safety_violations)}</td></tr>`).join('');
+  const selector = run.selector_model || {};
+  const realism = run.realism_comparison || {};
+  const stability = run.selector_stability || {};
+  const rewardStability = stability.mean_reward || {};
+  const winnerTable = winners ? `<div class="csvWrap mt-3"><table><thead><tr><th>Scenario</th><th>Winner</th><th>Reward</th><th>Success</th><th>Safety</th></tr></thead><tbody>${winners}</tbody></table></div>` : '<p class="muted mt-3">No selector winner table in this versioned run.</p>';
+  const realismRows = realism.distance_rows ? `<table class="miniTable mt-3"><tbody><tr><td>Real rows</td><td>${esc(realism.n_real_rows || '')}</td></tr><tr><td>Synthetic rows</td><td>${esc(realism.n_synthetic_rows || '')}</td></tr><tr><td>Mean SMD</td><td>${fmtMetric(realism.mean_smd_abs)}</td></tr><tr><td>Mean KS</td><td>${fmtMetric(realism.mean_ks_statistic)}</td></tr><tr><td>Worst SMD</td><td>${fmtMetric(realism.max_smd_abs)} ${esc(realism.max_smd_group || '')} / ${esc(realism.max_smd_feature || '')}</td></tr></tbody></table>` : '';
+  return `<div class="resultBlock"><h6>${esc(run.run_id)}</h6><table class="miniTable"><tbody><tr><td>Experiment</td><td>${esc(run.experiment || '')}</td></tr><tr><td>Selector reward</td><td>${fmtMetric(selector.mean_reward)}</td></tr><tr><td>Selector gap</td><td>${fmtMetric(selector.oracle_gap)}</td></tr><tr><td>Selector success</td><td>${fmtMetric(selector.success_rate)}</td></tr><tr><td>Stability reward</td><td>${rewardStability.mean !== undefined ? `${fmtMetric(rewardStability.mean)} +/- ${fmtMetric(rewardStability.std)}` : ''}</td></tr></tbody></table>${realismRows}<div class="actions mt-3">${aiModelArtifactLinks(run)}</div>${winnerTable}</div>`;
+}
 function paperResultHTML(run) {
   const paperItems = latestArtifacts.filter(a => (a.relative_path || '').startsWith('paper_artifacts'));
   if (!paperItems.length) return '<p class="muted">No final result folder found for this run yet.</p>';
@@ -800,11 +994,68 @@ async function loadPaperCompendium(force=false) {
   latestPaperCompendium = await getJSON('/api/paper-compendium');
   return latestPaperCompendium;
 }
-async function renderPaperCompendium(force=false) {
-  const root = document.getElementById('paperCompendium');
+async function loadFinalResult(force=false) {
+  if (latestFinalResult && !force) return latestFinalResult;
+  latestFinalResult = await getJSON('/api/final-result');
+  return latestFinalResult;
+}
+async function renderDashboardFinalResult(force=false) {
+  const root = document.getElementById('dashboardFinalResult');
   if (!root) return;
-  root.innerHTML = '<span class="muted">Loading paper data compendium...</span>';
-  root.innerHTML = paperCompendiumHTML(await loadPaperCompendium(force));
+  if (!latestFinalResult || force) root.innerHTML = '<span class="muted">Loading consolidated final result...</span>';
+  root.innerHTML = finalResultSummaryHTML(await loadFinalResult(force));
+}
+async function renderPaperCompendium(force=false) {
+  const finalRoot = document.getElementById('finalResult');
+  const compendiumRoot = document.getElementById('paperCompendium');
+  if (finalRoot) finalRoot.innerHTML = '<span class="muted">Loading consolidated final result...</span>';
+  if (compendiumRoot) compendiumRoot.innerHTML = '<span class="muted">Loading paper data compendium...</span>';
+  const [finalResult, compendium] = await Promise.all([loadFinalResult(force), loadPaperCompendium(force)]);
+  if (finalRoot) finalRoot.innerHTML = finalResultHTML(finalResult);
+  if (compendiumRoot) compendiumRoot.innerHTML = paperCompendiumHTML(compendium);
+}
+function finalResultSummaryHTML(data) {
+  if (!data || !data.exists) {
+    return `<div class="resultBlock"><h6>Consolidated Final Result</h6><p class="missing">docs/final_result.md is not available.</p><p class="muted">${esc(data?.path || '')}</p></div>`;
+  }
+  const payload = data.payload || {};
+  const primary = payload.primary_run || {};
+  const policies = primary.policy_metrics || {};
+  const oracle = policies.oracle || {};
+  const acls = policies.acls_rule || {};
+  const calibration = primary.calibration || {};
+  const winners = primary.scenario_winners || [];
+  const cards = [
+    ['Primary run', primary.run_id || ''],
+    ['Runs considered', `${payload.run_count || 0}`],
+    ['Completed runs', `${payload.completed_run_count || 0}`],
+    ['Oracle reward', fmtMetric(oracle.mean_reward)],
+    ['ACLS reward', fmtMetric(acls.mean_reward)],
+    ['Calibration pass', calibration.checks ? `${calibration.passed || 0}/${calibration.checks}` : '']
+  ].map(([k,v], i) => {
+    const styles = [['bg-lightprimary','text-primary'],['bg-lightsuccess','text-success'],['bg-lightinfo','text-info'],['bg-lightwarning','text-warning'],['bg-lighterror','text-error'],['bg-lightinfo','text-info']];
+    const [bg, text] = styles[i % styles.length];
+    return `<div class="card mb-0 shadow-none ${bg} w-full"><div class="card-body"><p class="font-semibold ${text} mb-1">${esc(k)}</p><h5 class="text-lg font-semibold ${text} mb-0">${esc(v)}</h5></div></div>`;
+  }).join('');
+  const winnerRows = winners.map(row => `<tr><td>${esc(SCENARIO_LABELS[row.scenario] || row.scenario || '')}</td><td><code>${esc(row.best_algorithm || row.final_action || '')}</code></td><td>${fmtMetric(row.mean_reward)}</td><td>${fmtMetric(row.success_rate)}</td><td>${fmtMetric(row.mean_time_s)}</td><td>${fmtMetric(row.mean_safety_violations)}</td></tr>`).join('');
+  return `<div class="resultStack">
+    <div class="ta-grid">${cards}</div>
+    <div class="resultBlock"><div class="previewHead"><div><b>Scenario-Level Final Actions</b><br><span class="previewMeta">${esc(data.modified_at || '')}</span></div><div class="actions"><a class="plain" target="_blank" href="/api/final-result/raw">Open Markdown</a><a class="plain" href="?tab=paper">Paper Data</a></div></div><div class="csvWrap"><table><thead><tr><th>Scenario</th><th>Final action</th><th>Reward</th><th>Success</th><th>Time</th><th>Safety</th></tr></thead><tbody>${winnerRows}</tbody></table></div></div>
+  </div>`;
+}
+function finalResultHTML(data) {
+  if (!data || !data.exists) {
+    return `<div class="resultBlock"><h6>Consolidated Final Result</h6><p class="missing">docs/final_result.md is not available.</p><p class="muted">${esc(data?.path || '')}</p></div>`;
+  }
+  const payload = data.payload || {};
+  const primary = payload.primary_run || {};
+  return `<div class="resultStack">
+    <div class="resultGrid">
+      <div class="resultBlock paperMeta"><h6>${esc(data.title || 'Consolidated Final Result')}</h6><table class="miniTable"><tbody><tr><td>Primary run</td><td><code>${esc(primary.run_id || '')}</code></td></tr><tr><td>Runs considered</td><td>${esc(payload.run_count || '')}</td></tr><tr><td>Completed runs</td><td>${esc(payload.completed_run_count || '')}</td></tr><tr><td>Patients/scenario</td><td>${esc(primary.patients_per_scenario || '')}</td></tr><tr><td>Horizon</td><td>${esc(primary.horizon_s || '')} s</td></tr><tr><td>File</td><td><code>${esc(data.path || '')}</code></td></tr></tbody></table><div class="actions mt-3"><a class="plain" target="_blank" href="/api/final-result/raw">Open Markdown</a></div></div>
+      <div class="resultBlock"><h6>Selection Rule</h6><p>${esc(payload.selection_rule || 'No selection rule recorded.')}</p><p class="muted">One-patient mutation runs are kept as checks, not as the manuscript primary result.</p></div>
+    </div>
+    <div class="resultBlock"><div class="previewHead"><div><b>Final Result Markdown</b><br><span class="previewMeta">${esc(data.modified_at || '')}</span></div><a class="plain" target="_blank" href="/api/final-result/raw">Open</a></div>${markdownPreviewHTML(data.markdown || '')}</div>
+  </div>`;
 }
 function paperCompendiumHTML(data) {
   if (!data || !data.exists) {
@@ -1111,8 +1362,14 @@ function drawChart(metrics) {
 async function refresh() {
   document.getElementById('clock').textContent = new Date().toLocaleString();
   await loadRuns();
+  if (activeTab === 'runs') {
+    await renderDashboardFinalResult();
+  }
   if (activeTab === 'paper') {
     await renderPaperCompendium();
+  }
+  if (activeTab === 'final') {
+    await renderAiModelRuns();
   }
   if (!currentRun) return;
   const [p, events, metrics, artifacts, failure, storage] = await Promise.all([
@@ -1187,7 +1444,9 @@ window.addEventListener('error', event => showUiError(event.error || event.messa
 window.addEventListener('unhandledrejection', event => showUiError(event.reason));
 document.getElementById('refresh').onclick = () => refresh().catch(showUiError);
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.tab));
+document.getElementById('reloadDashboardFinalResult').onclick = () => renderDashboardFinalResult(true).catch(showUiError);
 document.getElementById('reloadPaperCompendium').onclick = () => renderPaperCompendium(true).catch(showUiError);
+document.getElementById('reloadAiModelRuns').onclick = () => renderAiModelRuns(true).catch(showUiError);
 ['artifactCategoryFilter','artifactStepFilter','artifactKindFilter','artifactStatusFilter','artifactSearch'].forEach(id => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('input', () => renderArtifacts(currentRun, true));
@@ -1225,7 +1484,8 @@ document.getElementById('startRun').onclick = async () => {
   document.getElementById('controlOut').textContent = JSON.stringify(await postJSON('/api/start', {run_id: runId, config: cfg, resume: false}), null, 2);
 };
 setInterval(() => refresh().catch(showUiError), 3000);
-refresh().catch(showUiError);
+if (activeTab === 'runs') refresh().catch(showUiError);
+else setTab(activeTab);
 </script>
 </body>
 </html>"""
@@ -1349,6 +1609,484 @@ def _paper_compendium_sections(text: str) -> list[dict[str, str]]:
             section_path = section_path[1:-1]
         sections.append({"title": label.strip(), "path": section_path})
     return sections
+
+
+def _ai_model_run_summary(run_dir: Path) -> dict[str, Any]:
+    run_id = run_dir.name
+    if not run_dir.exists() or not run_dir.is_dir():
+        return {
+            "run_id": run_id,
+            "exists": False,
+            "status": "missing",
+            "run_dir": str(run_dir),
+            "display_name": run_id,
+            "experiment": None,
+            "config": {},
+            "selector_model": {},
+            "acls_rule": {},
+            "oracle": {},
+            "policies": {},
+            "scenario_winners": [],
+            "noise_robustness": [],
+            "realism_comparison": {},
+            "artifacts": {},
+        }
+
+    progress = _load_run_progress_summary(run_dir)
+    manifest = load_json(run_dir / "run_manifest.json") or {}
+    version_manifest = load_json(run_dir / "version_manifest.json") or {}
+    comparison_manifest = load_json(run_dir / "comparison" / "real_vs_synthetic_abnormal_manifest.json") or {}
+    config = progress.get("config") or manifest.get("config") or version_manifest.get("parameters") or {}
+    selector_report = load_json(run_dir / "selector_report.json") or {}
+    policy_summary = selector_report.get("policy_summary") if isinstance(selector_report, dict) else {}
+    if not isinstance(policy_summary, dict):
+        policy_summary = {}
+
+    paper_dir = run_dir / "paper_artifacts"
+    scenario_winners = _read_csv_rows(paper_dir / "paper_algorithm_winners.csv")
+    noise_robustness = _read_csv_rows(paper_dir / "paper_noise_robustness_table.csv")
+    realism_comparison = _realism_comparison_summary(run_dir, version_manifest, comparison_manifest)
+    artifacts = {
+        "selector_report": _artifact_file_summary(run_dir / "selector_report.json"),
+        "selector_stability": _artifact_file_summary(run_dir / "selector_stability.json"),
+        "algorithm_winners": _artifact_file_summary(paper_dir / "paper_algorithm_winners.csv"),
+        "algorithm_matrix": _artifact_file_summary(paper_dir / "paper_algorithm_matrix_table.csv"),
+        "noise_robustness": _artifact_file_summary(paper_dir / "paper_noise_robustness_table.csv"),
+        "feature_weights": _artifact_file_summary(paper_dir / "waveform_analysis_weights.svg"),
+        "policy_comparison": _artifact_file_summary(paper_dir / "policy_comparison.png"),
+        "success_heatmap": _artifact_file_summary(paper_dir / "treatment_success_heatmap.png"),
+        "final_results": _artifact_file_summary(paper_dir / "final_results.html"),
+        "distance_table": _artifact_file_summary(run_dir / "comparison" / "real_vs_synthetic_abnormal_feature_distances.csv"),
+        "group_summary": _artifact_file_summary(run_dir / "comparison" / "real_vs_synthetic_abnormal_group_summary.csv"),
+        "unmatched_labels": _artifact_file_summary(run_dir / "comparison" / "real_abnormal_unmatched_labels.csv"),
+        "smd_heatmap": _artifact_file_summary(run_dir / "comparison" / "real_vs_synthetic_smd_heatmap.png"),
+        "ks_heatmap": _artifact_file_summary(run_dir / "comparison" / "real_vs_synthetic_ks_heatmap.png"),
+        "pca_plot": _artifact_file_summary(run_dir / "comparison" / "real_vs_synthetic_feature_pca.png"),
+        "interpretation": _artifact_file_summary(run_dir / "RESULT_INTERPRETATION.md"),
+        "readme": _artifact_file_summary(run_dir / "README.md"),
+    }
+    progress_status = progress.get("classification") or progress.get("run_status") or progress.get("status")
+    if progress_status == "unknown":
+        progress_status = None
+    status = (
+        progress_status
+        or comparison_manifest.get("status")
+        or version_manifest.get("status")
+        or ("completed" if manifest else None)
+        or ("ok" if realism_comparison else None)
+        or ("ok" if version_manifest else "unknown")
+    )
+
+    return {
+        "run_id": run_id,
+        "exists": True,
+        "status": status,
+        "run_dir": str(run_dir),
+        "display_name": _run_display_name(run_dir, progress),
+        "experiment": version_manifest.get("experiment") or config.get("preset") or manifest.get("run_id"),
+        "updated_at": progress.get("updated_at") or manifest.get("updated_at") or manifest.get("created_at_utc") or version_manifest.get("created_at_utc"),
+        "duration_s": manifest.get("duration_s") or progress.get("duration_s"),
+        "config": _ai_model_config_summary(config),
+        "selector_model": _policy_metric_summary(policy_summary.get("selector_linucb")),
+        "acls_rule": _policy_metric_summary(policy_summary.get("acls_rule")),
+        "oracle": _policy_metric_summary(policy_summary.get("oracle")),
+        "policies": {str(key): _policy_metric_summary(value) for key, value in policy_summary.items() if isinstance(value, dict)},
+        "scenario_winners": scenario_winners,
+        "noise_robustness": noise_robustness,
+        "realism_comparison": realism_comparison,
+        "selector_stability": _selector_stability_summary(load_json(run_dir / "selector_stability.json") or {}),
+        "artifacts": artifacts,
+    }
+
+
+def _ai_model_config_summary(config: dict[str, Any]) -> dict[str, Any]:
+    fallback_configs = (
+        len(config.get("fallback_min_sqi") or [])
+        * len(config.get("fallback_entropy") or [])
+        * len(config.get("fallback_rr_cv") or [])
+    )
+    return {
+        "preset": config.get("preset"),
+        "patients_per_scenario": config.get("patients_per_scenario"),
+        "horizon_s": config.get("horizon_s") or config.get("observation_s"),
+        "train_fraction": config.get("train_fraction"),
+        "selector_seed": config.get("selector_seed"),
+        "selector_stability_seeds": config.get("selector_stability_seeds") or [],
+        "decision_grid_size": config.get("decision_grid_size"),
+        "bootstrap_samples": config.get("bootstrap_samples"),
+        "noise_profiles": config.get("noise_profiles") or [],
+        "fallback_config_count": fallback_configs,
+        "real_csv": config.get("real_csv"),
+        "extra_real_csvs": config.get("extra_real_csvs") or [],
+        "fs_hz": config.get("fs_hz"),
+        "variability": config.get("variability"),
+        "reward_weights": config.get("reward_weights") or {},
+    }
+
+
+def _policy_metric_summary(raw: Any) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        return {}
+    fields = (
+        "mean_reward",
+        "oracle_gap",
+        "success_rate",
+        "mean_energy",
+        "mean_time_s",
+        "mean_safety_violations",
+    )
+    summary: dict[str, float] = {}
+    for field in fields:
+        value = _as_float(raw.get(field))
+        if value is not None:
+            summary[field] = value
+    return summary
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return [
+            {str(key): _coerce_csv_value(value) for key, value in row.items()}
+            for row in csv.DictReader(handle)
+        ]
+
+
+def _coerce_csv_value(value: Any) -> Any:
+    if value is None:
+        return None
+    text = str(value)
+    if text == "":
+        return ""
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def _artifact_file_summary(path: Path) -> dict[str, Any]:
+    exists = path.exists() and path.is_file()
+    return {
+        "name": path.name,
+        "path": str(path.resolve() if exists else path),
+        "exists": exists,
+        "kind": path.suffix.lower().lstrip(".") or "file",
+        "size_bytes": path.stat().st_size if exists else None,
+        "modified_at": datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat() if exists else None,
+    }
+
+
+def _realism_comparison_summary(
+    run_dir: Path,
+    version_manifest: dict[str, Any],
+    comparison_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    distance_path = run_dir / "comparison" / "real_vs_synthetic_abnormal_feature_distances.csv"
+    rows = _read_csv_rows(distance_path)
+    smd_values = [value for value in (_as_float(row.get("smd_abs")) for row in rows) if value is not None]
+    ks_values = [value for value in (_as_float(row.get("ks_statistic")) for row in rows) if value is not None]
+    max_smd_row = max(rows, key=lambda row: _as_float(row.get("smd_abs")) or -1.0, default={})
+    max_ks_row = max(rows, key=lambda row: _as_float(row.get("ks_statistic")) or -1.0, default={})
+    groups = sorted({str(row.get("comparison_group")) for row in rows if row.get("comparison_group")})
+    if not rows and not comparison_manifest:
+        return {}
+    return {
+        "status": comparison_manifest.get("status") or ("ok" if rows else "unknown"),
+        "experiment": version_manifest.get("experiment"),
+        "n_real_rows": comparison_manifest.get("n_real_rows"),
+        "n_synthetic_rows": comparison_manifest.get("n_synthetic_rows"),
+        "real_source_counts": comparison_manifest.get("real_source_counts") or {},
+        "unmatched_real_labels": comparison_manifest.get("unmatched_real_labels") or [],
+        "comparison_groups": groups,
+        "distance_rows": len(rows),
+        "mean_smd_abs": sum(smd_values) / len(smd_values) if smd_values else None,
+        "max_smd_abs": _as_float(max_smd_row.get("smd_abs")),
+        "max_smd_feature": max_smd_row.get("feature"),
+        "max_smd_group": max_smd_row.get("comparison_group"),
+        "mean_ks_statistic": sum(ks_values) / len(ks_values) if ks_values else None,
+        "max_ks_statistic": _as_float(max_ks_row.get("ks_statistic")),
+        "max_ks_feature": max_ks_row.get("feature"),
+        "max_ks_group": max_ks_row.get("comparison_group"),
+    }
+
+
+def _selector_stability_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    aggregate = payload.get("aggregate") if isinstance(payload, dict) else {}
+    selector = aggregate.get("selector_linucb") if isinstance(aggregate, dict) else {}
+    if not isinstance(selector, dict):
+        return {}
+    metrics: dict[str, Any] = {}
+    for name in ("mean_reward", "oracle_gap", "success_rate", "mean_safety_violations"):
+        raw = selector.get(name)
+        if isinstance(raw, dict):
+            metrics[name] = {key: value for key, value in raw.items() if key in {"mean", "std", "min", "max", "n_seeds"}}
+    return metrics
+
+
+def _realism_aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    realism_runs = [run for run in runs if run.get("realism_comparison")]
+    smd_values = [
+        value
+        for value in (_as_float((run.get("realism_comparison") or {}).get("mean_smd_abs")) for run in realism_runs)
+        if value is not None
+    ]
+    ks_values = [
+        value
+        for value in (_as_float((run.get("realism_comparison") or {}).get("mean_ks_statistic")) for run in realism_runs)
+        if value is not None
+    ]
+    max_smd_runs = [
+        run
+        for run in realism_runs
+        if _as_float((run.get("realism_comparison") or {}).get("max_smd_abs")) is not None
+    ]
+    worst = max(
+        max_smd_runs,
+        key=lambda run: _as_float((run.get("realism_comparison") or {}).get("max_smd_abs")) or -1.0,
+        default=None,
+    )
+    worst_summary = worst.get("realism_comparison") if worst else {}
+    return {
+        "realism_run_count": len(realism_runs),
+        "mean_smd_abs": sum(smd_values) / len(smd_values) if smd_values else None,
+        "mean_ks_statistic": sum(ks_values) / len(ks_values) if ks_values else None,
+        "worst_run_id": worst.get("run_id") if worst else None,
+        "worst_smd_abs": worst_summary.get("max_smd_abs") if isinstance(worst_summary, dict) else None,
+        "worst_feature": worst_summary.get("max_smd_feature") if isinstance(worst_summary, dict) else None,
+        "worst_group": worst_summary.get("max_smd_group") if isinstance(worst_summary, dict) else None,
+    }
+
+
+def _versioned_run_conclusion(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    selector_runs = [run for run in runs if run.get("selector_model")]
+    selector_run_ids = [str(run.get("run_id") or "") for run in selector_runs if run.get("run_id")]
+    selector_average = _average_policy_metrics([run.get("selector_model") or {} for run in selector_runs])
+    acls_average = _average_policy_metrics([run.get("acls_rule") or {} for run in selector_runs])
+    oracle_average = _average_policy_metrics([run.get("oracle") or {} for run in selector_runs])
+    selector_reward = _as_float(selector_average.get("mean_reward"))
+    acls_reward = _as_float(acls_average.get("mean_reward"))
+    oracle_reward = _as_float(oracle_average.get("mean_reward"))
+    selector_success = _as_float(selector_average.get("success_rate"))
+    acls_success = _as_float(acls_average.get("success_rate"))
+    selector_gap = _as_float(selector_average.get("oracle_gap"))
+    acls_gap = _as_float(acls_average.get("oracle_gap"))
+
+    selector_comparable_run_count = 0
+    selector_beats_acls_count = 0
+    for run in selector_runs:
+        run_selector_reward = _as_float((run.get("selector_model") or {}).get("mean_reward"))
+        run_acls_reward = _as_float((run.get("acls_rule") or {}).get("mean_reward"))
+        if run_selector_reward is None or run_acls_reward is None:
+            continue
+        selector_comparable_run_count += 1
+        if run_selector_reward > run_acls_reward:
+            selector_beats_acls_count += 1
+
+    reward_delta_vs_acls = None
+    success_delta_vs_acls = None
+    verdict = "insufficient_selector_evidence"
+    headline = "AI selector conclusion is not available from the versioned runs."
+    if selector_reward is not None and acls_reward is not None:
+        reward_delta_vs_acls = selector_reward - acls_reward
+        if selector_reward > acls_reward:
+            if selector_comparable_run_count and selector_beats_acls_count == selector_comparable_run_count:
+                verdict = "selector_consistently_exceeds_acls"
+                headline = (
+                    f"Across {len(selector_runs)} selector-evaluated versioned runs, "
+                    "the learned selector exceeds the ACLS-rule baseline on average and in every comparable run."
+                )
+            else:
+                verdict = "selector_exceeds_acls_on_average"
+                headline = (
+                    f"Across {len(selector_runs)} selector-evaluated versioned runs, "
+                    "the learned selector exceeds the ACLS-rule baseline on average, but not consistently."
+                )
+        else:
+            verdict = "selector_underperforms_acls"
+            headline = (
+                f"Across {len(selector_runs)} selector-evaluated versioned runs, "
+                "the learned selector should not be claimed to outperform the ACLS-rule baseline yet."
+            )
+    if selector_success is not None and acls_success is not None:
+        success_delta_vs_acls = selector_success - acls_success
+
+    fixed_policy_groups: dict[str, list[dict[str, Any]]] = {}
+    for run in selector_runs:
+        for key, value in (run.get("policies") or {}).items():
+            if key.startswith("always_") and isinstance(value, dict) and value.get("mean_reward") is not None:
+                fixed_policy_groups.setdefault(key, []).append(value)
+    best_fixed_key = None
+    best_fixed_metrics: dict[str, Any] = {}
+    if fixed_policy_groups:
+        fixed_policy_averages = {
+            key: _average_policy_metrics(values)
+            for key, values in fixed_policy_groups.items()
+        }
+        best_fixed_key, best_fixed_metrics = max(
+            fixed_policy_averages.items(),
+            key=lambda item: _as_float(item[1].get("mean_reward")) or float("-inf"),
+        )
+
+    realism_runs = [run for run in runs if run.get("realism_comparison")]
+    realism_runs_sorted = sorted(realism_runs, key=lambda run: str(run.get("run_id") or ""))
+    first_realism = realism_runs_sorted[0] if realism_runs_sorted else {}
+    last_realism = realism_runs_sorted[-1] if realism_runs_sorted else {}
+    first_summary = first_realism.get("realism_comparison") or {}
+    last_summary = last_realism.get("realism_comparison") or {}
+    first_smd = _as_float(first_summary.get("mean_smd_abs"))
+    last_smd = _as_float(last_summary.get("mean_smd_abs"))
+    first_ks = _as_float(first_summary.get("mean_ks_statistic"))
+    last_ks = _as_float(last_summary.get("mean_ks_statistic"))
+
+    realism_summary = {
+        "first_run_id": first_realism.get("run_id"),
+        "latest_run_id": last_realism.get("run_id"),
+        "first_mean_smd_abs": first_smd,
+        "latest_mean_smd_abs": last_smd,
+        "mean_smd_abs_change": (last_smd - first_smd) if first_smd is not None and last_smd is not None else None,
+        "first_mean_ks_statistic": first_ks,
+        "latest_mean_ks_statistic": last_ks,
+        "mean_ks_statistic_change": (last_ks - first_ks) if first_ks is not None and last_ks is not None else None,
+        "latest_worst_feature": last_summary.get("max_smd_feature"),
+        "latest_worst_group": last_summary.get("max_smd_group"),
+        "latest_worst_smd_abs": last_summary.get("max_smd_abs"),
+        "latest_unmatched_labels": last_summary.get("unmatched_real_labels") or [],
+        "latest_real_rows": last_summary.get("n_real_rows"),
+        "latest_synthetic_rows": last_summary.get("n_synthetic_rows"),
+    }
+
+    claims = [
+        f"{len(selector_runs)} versioned run(s) include full AI selector outputs for treatment-selection analysis.",
+        "The versioned full-pipeline results support a treatment-selection problem with nontrivial scenario-specific winners.",
+        "The current LinUCB selector is evaluated against the ACLS-rule baseline, fixed-action baselines, and oracle policy.",
+        "The oracle gap shows that better state representation or learning could still improve the model.",
+        "The realism tuning versions reduce real-vs-synthetic mismatch, but residual feature mismatch remains too large for a clinical-performance claim.",
+    ]
+    limitations = [
+        "Do not claim AI superiority over ACLS from these versioned results.",
+        "Reward, success, and safety are simulator outcomes, not clinical endpoints.",
+        "The latest realism comparison still has large sample-entropy mismatch and unmatched real rhythm labels.",
+    ]
+    next_steps = [
+        "Improve noise-aware and morphology-aware features before claiming selector robustness.",
+        "Add or map currently unmatched abnormal rhythm labels before broadening conclusions.",
+        "Evaluate a stronger supervised oracle-label classifier or richer model against ACLS and LinUCB.",
+    ]
+
+    return {
+        "headline": headline,
+        "verdict": verdict,
+        "selector_run_id": selector_run_ids[0] if selector_run_ids else None,
+        "selector_run_ids": selector_run_ids,
+        "selector_run_count": len(selector_runs),
+        "selector_evidence": {
+            "selector_reward": selector_reward,
+            "selector_success_rate": selector_success,
+            "selector_oracle_gap": selector_gap,
+            "acls_reward": acls_reward,
+            "acls_success_rate": acls_success,
+            "acls_oracle_gap": acls_gap,
+            "oracle_reward": oracle_reward,
+            "reward_delta_vs_acls": reward_delta_vs_acls,
+            "success_delta_vs_acls": success_delta_vs_acls,
+            "selector_comparable_run_count": selector_comparable_run_count,
+            "selector_beats_acls_count": selector_beats_acls_count,
+            "best_always_policy": best_fixed_key,
+            "best_always_policy_reward": _as_float(best_fixed_metrics.get("mean_reward")),
+        },
+        "realism_evidence": realism_summary,
+        "claims": claims,
+        "limitations": limitations,
+        "next_steps": next_steps,
+    }
+
+
+def _ai_model_aggregate(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    selector_runs = [run for run in runs if run.get("selector_model")]
+    return {
+        "selector_model_average": _average_policy_metrics([run.get("selector_model") or {} for run in runs]),
+        "acls_rule_average": _average_policy_metrics([run.get("acls_rule") or {} for run in runs]),
+        "oracle_average": _average_policy_metrics([run.get("oracle") or {} for run in runs]),
+        "selector_model_run_count": len(selector_runs),
+        "selector_model_perfect_oracle_gap_count": sum(
+            1 for run in selector_runs if _as_float((run.get("selector_model") or {}).get("oracle_gap")) == 0.0
+        ),
+        "selector_model_successful_run_count": sum(
+            1 for run in selector_runs if (_as_float((run.get("selector_model") or {}).get("success_rate")) or 0.0) >= 1.0
+        ),
+        "selector_model_attention_runs": [
+            run.get("run_id")
+            for run in selector_runs
+            if (_as_float((run.get("selector_model") or {}).get("success_rate")) or 0.0) < 1.0
+            or (_as_float((run.get("selector_model") or {}).get("oracle_gap")) or 0.0) > 0.0
+        ],
+    }
+
+
+def _average_policy_metrics(metrics_list: list[dict[str, Any]]) -> dict[str, float]:
+    fields = (
+        "mean_reward",
+        "oracle_gap",
+        "success_rate",
+        "mean_energy",
+        "mean_time_s",
+        "mean_safety_violations",
+    )
+    averages: dict[str, float] = {}
+    for field in fields:
+        values = [
+            value
+            for value in (_as_float(metrics.get(field)) for metrics in metrics_list if isinstance(metrics, dict))
+            if value is not None
+        ]
+        if values:
+            averages[field] = sum(values) / len(values)
+    return averages
+
+
+def _ai_model_scenario_consensus(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        for row in run.get("scenario_winners") or []:
+            scenario = str(row.get("scenario") or "")
+            if not scenario:
+                continue
+            grouped.setdefault(scenario, []).append(
+                {
+                    "run_id": run.get("run_id"),
+                    "algorithm": row.get("best_algorithm") or row.get("final_action") or row.get("algorithm"),
+                    "mean_reward": _as_float(row.get("mean_reward")),
+                    "success_rate": _as_float(row.get("success_rate")),
+                }
+            )
+
+    order = ["monomorphic_vt", "nsr", "polymorphic_vt", "svt_flutter", "vf_like"]
+    rows: list[dict[str, Any]] = []
+    for scenario in sorted(grouped, key=lambda item: (order.index(item) if item in order else len(order), item)):
+        entries = grouped[scenario]
+        counts: dict[str, int] = {}
+        for entry in entries:
+            algorithm = str(entry.get("algorithm") or "")
+            counts[algorithm] = counts.get(algorithm, 0) + 1
+        consensus_algorithm = max(counts.items(), key=lambda item: (item[1], item[0]))[0] if counts else ""
+        reward_values = [value for value in (_as_float(entry.get("mean_reward")) for entry in entries) if value is not None]
+        success_values = [value for value in (_as_float(entry.get("success_rate")) for entry in entries) if value is not None]
+        rows.append(
+            {
+                "scenario": scenario,
+                "consensus_algorithm": consensus_algorithm,
+                "agreement": f"{counts.get(consensus_algorithm, 0)}/{len(entries)}",
+                "algorithm_counts": dict(sorted(counts.items())),
+                "mean_reward": sum(reward_values) / len(reward_values) if reward_values else None,
+                "success_rate": sum(success_values) / len(success_values) if success_values else None,
+                "per_run": entries,
+            }
+        )
+    return rows
 
 
 def _run_display_name(run_dir: Path, snapshot: dict[str, Any] | None = None, labels: dict[str, str] | None = None) -> str:
