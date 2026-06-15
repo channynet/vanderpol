@@ -52,13 +52,23 @@ class StaticDashboardTests(unittest.TestCase):
             )
             input_md.write_text("# Final\n\nAvoid closing script: </script>\n", encoding="utf-8")
 
-            generate_static_dashboard(input_json, input_md, output)
+            generate_static_dashboard(
+                input_json,
+                input_md,
+                output,
+                runs_dir=root / "missing-runs",
+                versioned_runs_dir=root / "missing-versioned-runs",
+                paper_compendium=root / "missing-paper.md",
+            )
 
             html = output.read_text(encoding="utf-8")
-            self.assertIn("Vanderpol Static Result Dashboard", html)
+            self.assertIn("Vanderpol Runs", html)
+            self.assertIn("Experiment Dashboard", html)
+            self.assertIn("static-dashboard-data", html)
+            self.assertIn("staticArtifactUrl", html)
             self.assertIn("stage9_n100_time2", html)
             self.assertIn("<\\/script>", html)
-            self.assertIn("final_result_runs.csv", html)
+            self.assertIn("static-tailadmin-theme", html)
 
 
 if __name__ == "__main__":
