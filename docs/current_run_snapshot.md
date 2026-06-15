@@ -2,6 +2,7 @@
 
 Current dashboard-facing result:
 
+- `docs/dashboard/index.html`
 - `docs/final_result.md`
 - `docs/final_result.json`
 - `docs/final_result_runs.csv`

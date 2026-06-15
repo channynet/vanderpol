@@ -22,6 +22,7 @@ chooses one of five actions:
 
 The current dashboard-facing result is:
 
+- [`dashboard/index.html`](dashboard/index.html)
 - [`final_result.md`](final_result.md)
 - Primary evidence run: `outputs/runs/stage9_n100_time2`
 - Run set: `71` paper-ready runs, `70` completed
@@ -35,12 +36,13 @@ It completed all `8/8` pipeline steps.
 
 ## Read These First
 
-1. [`final_result.md`](final_result.md)
-2. [`dashboard_results_share.md`](dashboard_results_share.md)
-3. [`03_v001_result_summary.md`](03_v001_result_summary.md)
-4. [`04_v001_figure_guide.md`](04_v001_figure_guide.md)
-5. [`02_data_usage.md`](02_data_usage.md)
-6. [`05_next_work.md`](05_next_work.md)
+1. [`dashboard/index.html`](dashboard/index.html)
+2. [`final_result.md`](final_result.md)
+3. [`dashboard_results_share.md`](dashboard_results_share.md)
+4. [`03_v001_result_summary.md`](03_v001_result_summary.md)
+5. [`04_v001_figure_guide.md`](04_v001_figure_guide.md)
+6. [`02_data_usage.md`](02_data_usage.md)
+7. [`05_next_work.md`](05_next_work.md)
 
 ## Main Result
 

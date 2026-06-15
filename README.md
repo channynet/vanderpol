@@ -41,6 +41,7 @@ Current headline:
 
 The dashboard's shareable result files are:
 
+- [`docs/dashboard/index.html`](docs/dashboard/index.html)
 - [`docs/final_result.md`](docs/final_result.md)
 - [`docs/final_result.json`](docs/final_result.json)
 - [`docs/final_result_runs.csv`](docs/final_result_runs.csv)
@@ -51,6 +52,14 @@ Refresh them with:
 ```powershell
 $env:PYTHONPATH='src'
 python scripts/generate_final_result.py
+python scripts/generate_static_dashboard.py
+```
+
+If GitHub Pages is configured to publish from the `docs/` folder, the static
+dashboard is available at:
+
+```text
+https://channynet.github.io/vanderpol/dashboard/
 ```
 
 Open the local dashboard with:

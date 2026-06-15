@@ -7,6 +7,7 @@ who does not have the local dashboard open.
 
 | File | Use |
 | --- | --- |
+| [`dashboard/index.html`](dashboard/index.html) | Static dashboard snapshot for GitHub Pages or direct browser sharing. |
 | [`final_result.md`](final_result.md) | Human-readable final result and main conclusion. |
 | [`final_result.json`](final_result.json) | Machine-readable payload used by the dashboard final-result view. |
 | [`final_result_runs.csv`](final_result_runs.csv) | Inventory of paper-ready runs included in the consolidated result. |
@@ -40,6 +41,22 @@ The local dashboard exposes these result surfaces:
 the `docs/final_result.*` files unless the full run artifact folders are being
 shared by another storage channel.
 
+## Static GitHub Pages Dashboard
+
+The static dashboard is generated at:
+
+- [`dashboard/index.html`](dashboard/index.html)
+
+It embeds the consolidated final result payload, so it works without the local
+Python API server.
+
+If GitHub Pages is configured to publish from the `docs/` folder on `main`, the
+public URL is:
+
+```text
+https://channynet.github.io/vanderpol/dashboard/
+```
+
 ## Rebuild The Shareable Files
 
 Run this from the repository root:
@@ -47,10 +64,12 @@ Run this from the repository root:
 ```powershell
 $env:PYTHONPATH='src'
 python scripts/generate_final_result.py
+python scripts/generate_static_dashboard.py
 ```
 
 The command refreshes:
 
+- `docs/dashboard/index.html`
 - `docs/final_result.md`
 - `docs/final_result.json`
 - `docs/final_result_runs.csv`
@@ -84,13 +103,16 @@ For a clean sharing commit, include:
 - `docs/00_start_here.md`
 - `docs/current_run_snapshot.md`
 - `docs/dashboard_results_share.md`
+- `docs/dashboard/index.html`
 - `docs/final_result.md`
 - `docs/final_result.json`
 - `docs/final_result_runs.csv`
 - `scripts/generate_final_result.py`
+- `scripts/generate_static_dashboard.py`
 - `scripts/serve_dashboard.py`
 - `src/vanderpol/dashboard.py`
 - `tests/test_dashboard.py`
+- `tests/test_static_dashboard.py`
 - `configs/bundle_n20_ai_selector.json`
 
 Do not include `outputs/` in the GitHub commit. It is ignored because the full
@@ -105,10 +127,11 @@ Suggested command sequence once GitHub CLI/auth is available:
 ```powershell
 git checkout -b codex/share-dashboard-results
 git add README.md docs/README.md docs/00_start_here.md docs/current_run_snapshot.md
-git add docs/dashboard_results_share.md docs/final_result.md docs/final_result.json docs/final_result_runs.csv
-git add scripts/generate_final_result.py scripts/serve_dashboard.py src/vanderpol/dashboard.py tests/test_dashboard.py
+git add docs/dashboard_results_share.md docs/dashboard/index.html docs/final_result.md docs/final_result.json docs/final_result_runs.csv
+git add scripts/generate_final_result.py scripts/generate_static_dashboard.py scripts/serve_dashboard.py src/vanderpol/dashboard.py
+git add tests/test_dashboard.py tests/test_static_dashboard.py
 git add configs/bundle_n20_ai_selector.json
-git commit -m "Document dashboard results"
+git commit -m "Publish static dashboard results"
 git push -u origin codex/share-dashboard-results
 ```
 

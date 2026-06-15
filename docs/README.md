@@ -13,6 +13,7 @@ This directory is now organized around one main path:
 | File | Purpose |
 | --- | --- |
 | [`00_start_here.md`](00_start_here.md) | Current project status and the minimum set of files to read. |
+| [`dashboard/index.html`](dashboard/index.html) | Static GitHub Pages dashboard snapshot. |
 | [`final_result.md`](final_result.md) | Consolidated dashboard-facing final result across paper-ready runs. |
 | [`dashboard_results_share.md`](dashboard_results_share.md) | How to share dashboard results through docs or GitHub. |
 | [`final_result_runs.csv`](final_result_runs.csv) | Paper-ready run inventory used by the consolidated result. |
@@ -33,6 +34,7 @@ This directory is now organized around one main path:
 
 The current consolidated dashboard result is:
 
+- [`dashboard/index.html`](dashboard/index.html)
 - [`final_result.md`](final_result.md)
 - Primary evidence run: `outputs/runs/stage9_n100_time2`
 - Run set: `71` paper-ready runs, `70` completed
